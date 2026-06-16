@@ -1,0 +1,74 @@
+Vector Databases: Concepts, Architecture, and AWS Options
+
+A vector database is a specialized data store designed to efficiently store, index, and search high-dimensional embedding vectors. Where a traditional database finds rows by matching field values exactly, a vector database finds vectors by proximity — returning the N items whose embeddings are closest to a query embedding.
+
+--- Why Vector Databases Exist ---
+
+Traditional databases (PostgreSQL, MySQL, DynamoDB) use indexes that assume data has a natural order: alphabetical, numeric, or sorted by key. Embedding vectors have no such order. A 1024-dimensional vector can't be sorted in a way that makes range queries meaningful.
+
+Vector databases solve this with Approximate Nearest Neighbor (ANN) algorithms that find close vectors without comparing against every stored vector. This makes billion-scale vector search feasible in milliseconds.
+
+--- How Similarity Search Works ---
+
+The core operation in a vector database is: given a query vector q, find the k vectors in the database that are most similar to q.
+
+Distance metrics:
+- Cosine similarity: Measures the angle between vectors. Values range from -1 to 1. Used when the magnitude of vectors doesn't matter — only their direction. Most common for text embeddings.
+- Dot product: The raw inner product. Equivalent to cosine similarity when vectors are normalized to unit length.
+- Euclidean distance (L2): Measures straight-line distance. Used in image embeddings and some structured data scenarios.
+
+ANN algorithms:
+- HNSW (Hierarchical Navigable Small World): Builds a multi-layer graph where nodes are connected to nearby neighbors. Traverses from the top (coarse) layer to the bottom (fine) layer to find approximate neighbors. Excellent recall, fast queries, but high memory usage.
+- IVF (Inverted File Index): Clusters vectors into groups. At query time, searches only the closest clusters. Lower memory than HNSW but slightly lower recall.
+- FAISS (Facebook AI Similarity Search): A library (not a database) implementing IVF, HNSW, and other ANN algorithms. Used in Stage 1 of this workshop as a lightweight local option.
+
+--- Hybrid Search ---
+
+Dense-only search (embedding similarity) can miss results with exact keyword matches that have low embedding similarity — common with product codes, proper nouns, and technical identifiers.
+
+Sparse retrieval (BM25/keyword search) finds exact matches but misses semantic synonyms.
+
+Hybrid search combines both: run both retrievals, then merge results using Reciprocal Rank Fusion (RRF). RRF assigns a score of 1/(k + rank) to each result from each retrieval method, then sums across methods. This normalizes the score scales and produces well-calibrated combined rankings.
+
+Most production RAG systems use hybrid search. Amazon OpenSearch Serverless and Amazon Bedrock Knowledge Bases support hybrid search out of the box.
+
+--- Vector Database Options ---
+
+Local / in-process:
+- FAISS: C++ library with Python bindings. No server, no network. Fast for up to a few million vectors. Used in Stage 1 of this workshop.
+- ChromaDB: Simple local vector store with an optional server mode. Good for development.
+- LanceDB: Column-oriented storage, efficient for datasets that exceed RAM.
+
+AWS-managed:
+- Amazon OpenSearch Serverless (k-NN): Fully managed search service that supports both dense vector search (HNSW or IVF) and traditional keyword search. Used by Bedrock Knowledge Bases. Scales automatically. Minimum cost: ~$0.24/OCU-hour (2 OCU minimum = ~$0.48/hr baseline).
+- Amazon Aurora PostgreSQL with pgvector: Add vector search to your existing relational database. Good when you need to combine vector search with SQL joins. Lower cost than OpenSearch at small scale.
+- Amazon MemoryDB for Redis with vector search: Sub-millisecond vector search for real-time applications. Good for session-specific retrieval where data is ephemeral.
+
+Third-party (available on Bedrock KB):
+- Pinecone: Purpose-built vector database with a managed cloud offering. High performance at large scale.
+- MongoDB Atlas: Adds vector search to the MongoDB document store. Good for teams already using MongoDB.
+- Redis Enterprise: Adds vector search to Redis. Familiar operational model for teams using Redis.
+
+--- Metadata Filtering ---
+
+Most vector databases support pre-filtering or post-filtering by metadata before or after vector similarity search.
+
+Pre-filtering (filter then search): Apply a metadata filter first, then run ANN search on the filtered subset. More precise but requires the filter to be index-aware.
+
+Post-filtering (search then filter): Run ANN search on all vectors, then apply the metadata filter to results. Simpler but can return fewer than k results if many are filtered out.
+
+Example use cases for metadata filtering in RAG:
+- Filter by document creation date ("only documents from the last 6 months")
+- Filter by department ("only HR documents")
+- Filter by product version ("only documents tagged v2.0")
+- Filter by language ("only English documents")
+
+--- Choosing a Vector Database ---
+
+For a workshop or proof of concept: FAISS (local) or Bedrock Knowledge Bases (managed).
+For a startup or small team: Pinecone managed cloud or OpenSearch Serverless.
+For an enterprise with existing AWS infrastructure: OpenSearch Serverless + Bedrock Knowledge Bases.
+For real-time requirements: MemoryDB for Redis.
+For cost-sensitive workloads at small scale: Aurora PostgreSQL + pgvector.
+
+The key factors are: scale (number of vectors), latency requirements, operational overhead tolerance, and whether you need hybrid search. For most RAG applications starting out, Bedrock Knowledge Bases with OpenSearch Serverless is the lowest-friction path — it handles chunking, embedding, indexing, and retrieval as a managed service.

@@ -1,0 +1,99 @@
+Serverless Architecture Patterns on AWS
+
+Serverless means you write code without managing servers. AWS provisions, scales, patches, and monitors the infrastructure automatically. You pay only for what you use, down to the millisecond.
+
+The core serverless services on AWS are AWS Lambda, Amazon API Gateway, Amazon S3, Amazon DynamoDB, Amazon SQS/SNS, and Amazon EventBridge. Together they cover compute, APIs, storage, data, messaging, and event routing.
+
+--- AWS Lambda ---
+
+Lambda is the core serverless compute service. You deploy a function (a ZIP or container), define the runtime (Python, Node.js, Java, Go, etc.), and configure a trigger. Lambda handles everything else.
+
+Key properties:
+- Cold start: The first invocation of a new instance requires loading the runtime and function code. Typically 100ms–2s depending on runtime and package size. Container images have higher cold starts than ZIP packages.
+- Concurrency: Lambda scales by creating new instances for each concurrent request. Default limit: 1000 concurrent instances per account per region.
+- Duration: Maximum 15 minutes per invocation. For longer workloads, use Step Functions.
+- Memory: 128 MB to 10 GB. CPU scales proportionally with memory — a 1 GB function gets twice the CPU of a 512 MB function.
+- Stateless: Each invocation is independent. Store state in DynamoDB, S3, or ElastiCache.
+
+Lambda is the compute backbone of most serverless RAG architectures: processing documents when they're uploaded to S3, handling API requests from the frontend, running evaluation jobs on a schedule, or acting as AgentCore Gateway targets.
+
+--- Amazon API Gateway ---
+
+API Gateway creates managed HTTP endpoints that trigger Lambda functions (or other backends). It handles SSL termination, request routing, authentication, rate limiting, and caching.
+
+Types:
+- REST API: Full-featured, supports usage plans, API keys, and resource policies. Slightly higher latency.
+- HTTP API: Simpler, lower latency, lower cost. Supports JWT authorizers (Cognito, custom). Recommended for most new workloads.
+- WebSocket API: Maintains persistent connections for real-time streaming — used for streaming agent responses to a frontend.
+
+For AgentCore workflows, API Gateway typically fronts Lambda functions that are exposed as AgentCore Gateway tools. The agent calls the Gateway tool, which routes to API Gateway, which invokes the Lambda.
+
+--- Amazon S3 ---
+
+S3 is the foundation of serverless data storage on AWS. It stores objects (files) of any size in buckets. S3 is the most common data source for Bedrock Knowledge Bases.
+
+For RAG:
+- Upload documents (PDFs, text files, HTML) to an S3 bucket
+- Configure Bedrock Knowledge Bases to use the bucket as a data source
+- Bedrock automatically indexes new documents when the data source syncs
+
+S3 event notifications can trigger Lambda to process documents immediately when uploaded, enabling near-real-time index updates.
+
+S3 storage classes let you balance cost and access speed: Standard for frequently accessed data, Infrequent Access (IA) for archival documents you might occasionally retrieve, and Glacier for long-term compliance archives that rarely need querying.
+
+--- Amazon DynamoDB ---
+
+DynamoDB is a serverless, fully managed NoSQL database. It scales automatically from zero to petabytes with consistent single-digit millisecond latency.
+
+For agent workloads, DynamoDB commonly stores:
+- Session metadata (user ID, session start time, conversation count)
+- Agent configuration per customer
+- Tool call audit logs
+- Cached RAG results to reduce repeated embedding and retrieval costs
+
+DynamoDB Streams enable event-driven patterns: when an agent writes session data to DynamoDB, a Lambda processes the stream to extract memory facts for AgentCore Memory.
+
+--- Amazon SQS and SNS ---
+
+SQS (Simple Queue Service) decouples producers and consumers with a message queue. Messages persist until a consumer processes them. Useful for batching document ingestion jobs, queuing RAG evaluation runs, or buffering high-volume tool call logs.
+
+SNS (Simple Notification Service) fans out one event to many subscribers. When a new document arrives in S3, an SNS notification can simultaneously trigger: a Lambda to update the Bedrock KB, a DynamoDB write to track the document's index status, and an email notification to the admin.
+
+SQS + SNS together create the fan-out-then-process pattern common in serverless data pipelines.
+
+--- Amazon EventBridge ---
+
+EventBridge is a serverless event bus that routes events between AWS services, SaaS applications, and custom applications. Events are JSON objects that match routing rules.
+
+For agent architectures:
+- Schedule RAG index syncs on a cron: "sync the Bedrock KB every day at 2 AM"
+- Route agent evaluation failures to a Slack webhook via an EventBridge Pipe
+- Trigger retraining workflows when model evaluation scores drop below a threshold
+
+EventBridge Scheduler replaces CloudWatch Events for time-based triggers and supports one-time schedules (useful for long-running agent tasks with a deadline).
+
+--- Serverless RAG Architecture Pattern ---
+
+A complete serverless RAG architecture on AWS:
+
+Data ingestion:
+S3 (document upload) → EventBridge → Lambda (pre-process) → Bedrock KB sync
+
+Query handling:
+User → CloudFront → API Gateway → Lambda → AgentCore Runtime → Bedrock KB + Claude → response
+
+Observability:
+AgentCore → CloudWatch Logs → CloudWatch Metrics → CloudWatch Dashboard
+AgentCore → X-Ray → Trace Map
+
+This architecture has no servers to patch, scales automatically with load, and costs near-zero when idle.
+
+--- Cost Model ---
+
+Lambda: $0.20 per million invocations + $0.0000166667 per GB-second of compute.
+API Gateway HTTP API: $1.00 per million API calls.
+S3: $0.023 per GB-month (Standard) + $0.0004 per 1000 PUT requests.
+DynamoDB: $1.25 per million write units + $0.25 per million read units (on-demand).
+EventBridge: $1.00 per million events.
+
+For a typical RAG API handling 10,000 queries/day: Lambda + API Gateway cost < $5/month. The dominant cost in a Bedrock RAG architecture is typically the model inference (embeddings + generation tokens), not the infrastructure.

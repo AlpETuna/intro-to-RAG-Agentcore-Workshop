@@ -1,0 +1,92 @@
+Amazon Bedrock: Model Families and Selection Guide
+
+Amazon Bedrock is a fully managed service that provides access to foundation models from Amazon and leading AI companies through a single API. You pay per token — no infrastructure to manage.
+
+--- Model Families on Bedrock ---
+
+Anthropic Claude
+Claude is Anthropic's model family, optimized for safety, helpfulness, and honesty.
+
+Claude 3.5 Sonnet v2 (claude-3-5-sonnet-20241022): The best balance of intelligence and speed in the Claude 3.x family. Recommended for complex reasoning, multi-step tool use, and agentic workflows. 200K token context window.
+
+Claude 3 Haiku (claude-3-haiku-20240307): The fastest and most cost-efficient Claude model. Ideal for simple question-answering, classification, and high-throughput RAG where latency matters. 200K token context window.
+
+Claude 3 Opus (claude-3-opus-20240229): The most capable Claude 3 model for nuanced tasks requiring deep understanding. Higher cost — use for complex reasoning where Sonnet is insufficient.
+
+Claude 4 family: Claude 4.7 Opus and 4.6 Sonnet represent the latest generation with improved instruction following, coding ability, and agentic capabilities.
+
+Amazon Titan
+Amazon's own model family, optimized for enterprise workloads and tightly integrated with other AWS services.
+
+Titan Text Embeddings V2 (amazon.titan-embed-text-v2:0): Generates 1024-dimensional embedding vectors. Supports normalization for cosine similarity. Optimized for English with multilingual support. Input limit: 8192 tokens. This is the recommended embedding model for Bedrock Knowledge Bases.
+
+Titan Text Premier: Amazon's flagship text generation model, designed for enterprise RAG and summarization.
+
+Titan Multimodal Embeddings: Supports embedding both text and images into the same vector space — useful for multimodal RAG.
+
+Meta Llama
+Open-weight models available on Bedrock for teams requiring transparency or custom fine-tuning.
+
+Llama 3.1 (70B, 405B): Strong open-source performance, suitable for RAG workloads where you want to avoid third-party model dependencies.
+
+Mistral
+Mistral 7B and Mixtral 8x7B available for cost-sensitive, high-throughput workloads.
+
+Amazon Nova
+Amazon's newest model family, optimized for efficiency and AWS integration.
+
+Nova Lite: Ultra-fast, low-cost model for real-time RAG responses.
+Nova Pro: Balanced model for multi-modal tasks and longer context.
+Nova Premier: Amazon's most capable model for complex agentic tasks.
+
+--- Model Selection Framework ---
+
+For RAG workloads, choose based on these factors:
+
+Query complexity: Simple factual lookups → Claude 3 Haiku or Nova Lite. Complex multi-hop reasoning → Claude 3.5 Sonnet or Nova Pro. Research-grade analysis → Claude 3 Opus.
+
+Throughput requirements: >100 queries/second → Haiku or Nova Lite. Standard workloads → Sonnet. Batch processing → any model via Batch Inference API.
+
+Context length: Standard RAG (3–10 chunks of 500 tokens each) → any model. Long-document RAG (50+ chunks) → Claude 3.5 Sonnet (200K context) or Nova Pro.
+
+Cost sensitivity: Development and testing → Haiku (cheapest). Production → Sonnet (best value). High-stakes decisions → Opus.
+
+--- Bedrock Inference Options ---
+
+On-demand: Pay per token, no commitment. Best for development and variable workloads.
+
+Provisioned Throughput: Pre-purchase model units for guaranteed throughput. Required for custom fine-tuned models. Reduces latency at high load.
+
+Batch Inference: Process thousands of prompts asynchronously at ~50% cost reduction. Ideal for offline RAG evaluation, bulk document processing, or overnight jobs.
+
+Cross-region inference: Route requests to the closest available region automatically. Enables higher throughput limits by pooling capacity across us-east-1, us-west-2, and eu-west-1.
+
+--- Embedding Model Selection ---
+
+For most Bedrock RAG workloads, use Amazon Titan Text Embeddings V2:
+- Native Bedrock integration — no third-party dependencies
+- Supports normalized vectors (required for cosine similarity in most vector DBs)
+- 1024 dimensions — high quality with manageable storage cost
+- Supports 8192 input tokens per embedding call
+
+For multilingual workloads or when comparing to other embedding providers, Bedrock also supports Cohere Embed v3 (English and multilingual variants).
+
+--- Bedrock API Basics ---
+
+All model calls go through bedrock-runtime, regardless of the model:
+
+invoke_model: Synchronous single call. Response returned when generation completes.
+invoke_model_with_response_stream: Streaming. Tokens arrive as they're generated.
+converse: Unified multi-turn conversation API that works the same across all models — the recommended interface for chat and agentic applications.
+
+The Converse API normalizes differences between model providers. You write one integration and it works with Claude, Titan, Llama, and others without adapter code.
+
+--- Guardrails ---
+
+Bedrock Guardrails adds a content filtering layer between your application and any model. Guardrails can block:
+- Hate speech, violence, sexual content
+- Personally identifiable information (PII) — mask or block SSNs, emails, phone numbers
+- Topics you define (e.g., "competitor names", "financial advice")
+- Grounding violations in RAG — block answers that aren't supported by the retrieved context
+
+Guardrails are applied at the API layer, so they work with any model and any application architecture.

@@ -1,0 +1,86 @@
+Retrieval-Augmented Generation: Fundamentals and Patterns
+
+Retrieval-Augmented Generation (RAG) is an AI architecture that grounds large language model responses in a private or up-to-date knowledge base. Instead of relying solely on the model's parametric knowledge (what it learned during training), RAG retrieves relevant documents at inference time and passes them as context to the model.
+
+--- Why RAG Exists ---
+
+Large language models have three fundamental limitations that RAG addresses:
+
+1. Knowledge cutoff: Models are trained on a static dataset with a fixed date. They cannot know about events, products, or documents that didn't exist at training time.
+
+2. Hallucination: When a model lacks factual grounding, it may generate plausible-sounding but incorrect information with high confidence.
+
+3. Private data: Models trained on public internet data have no knowledge of your company's internal documents, customer records, or proprietary information.
+
+RAG solves all three by retrieving relevant, authoritative content before generating a response.
+
+--- The RAG Pipeline ---
+
+A standard RAG pipeline has two phases: indexing and retrieval.
+
+Indexing (done once, offline):
+- Load source documents (PDFs, text files, web pages, databases)
+- Chunk documents into smaller pieces (typically 256–1024 tokens)
+- Generate embedding vectors for each chunk using an embedding model
+- Store embeddings in a vector database alongside the original text
+
+Retrieval (done at inference, online):
+- Receive a user query
+- Embed the query using the same embedding model
+- Perform nearest-neighbor search in the vector database
+- Return the top-k most similar chunks (typically 3–10)
+- Combine retrieved chunks with the query in a prompt
+- Pass the combined prompt to the LLM for generation
+- Return the generated answer (optionally with citations)
+
+--- Chunking Strategies ---
+
+How you split documents significantly impacts retrieval quality.
+
+Fixed-size chunking: Split every N tokens with an overlap of M tokens between chunks. Simple and predictable. Overlap (typically 10–20% of chunk size) prevents context from being cut at boundaries.
+
+Semantic chunking: Use sentence or paragraph boundaries. Preserves natural units of meaning but produces variable-length chunks.
+
+Hierarchical chunking: Store both a summary chunk and its constituent detail chunks. Retrieve summaries for broad queries, detail chunks for specific questions.
+
+Recursive character splitting: Tries to split on paragraph breaks, then sentence breaks, then word breaks — a practical balance.
+
+The right chunk size depends on your documents and query patterns. Smaller chunks (128–256 tokens) improve retrieval precision but may lose context. Larger chunks (512–1024 tokens) preserve context but reduce precision.
+
+--- Embedding Models ---
+
+An embedding model converts text into a dense vector — a list of floating-point numbers (typically 256–4096 dimensions) that encodes semantic meaning. Texts with similar meanings cluster near each other in this high-dimensional space.
+
+Amazon Titan Text Embeddings V2 produces 1024-dimensional vectors and is optimized for English and multilingual RAG workloads. It supports up to 8192 input tokens, making it suitable for larger chunks.
+
+When choosing an embedding model, consistency is critical: you must use the same model for both indexing and retrieval, or the vector spaces won't align.
+
+--- Retrieval Methods ---
+
+Dense retrieval (semantic search): Uses embedding similarity (cosine distance or dot product) to find semantically related chunks, even when they use different words than the query.
+
+Sparse retrieval (keyword search): Uses algorithms like BM25 to find chunks with exact keyword matches. Works well for specific terms, product names, and codes.
+
+Hybrid search: Combines dense and sparse retrieval scores, typically via Reciprocal Rank Fusion (RRF). Outperforms either approach alone in most benchmarks.
+
+--- Evaluation Metrics ---
+
+RAG quality is measured across three dimensions:
+
+Faithfulness: Is the generated answer grounded in the retrieved context? High faithfulness means no hallucination beyond what the context supports.
+
+Context relevance: Are the retrieved chunks actually relevant to the query? Irrelevant context wastes the model's context window and introduces noise.
+
+Answer relevance: Does the final answer address the user's actual question? An answer can be faithful to irrelevant context yet still miss the point.
+
+Together these three form the RAG Triad, popularized by frameworks like RAGAS and TruLens.
+
+--- Common Failure Modes ---
+
+Retrieval failure: The right document isn't retrieved because the query phrasing doesn't match the chunk. Solution: query rewriting, hypothetical document embeddings (HyDE), or multi-query retrieval.
+
+Lost in the middle: LLMs attend to the beginning and end of context more than the middle. Solution: rerank retrieved chunks to put the most relevant ones first or last.
+
+Chunk boundary problems: A key fact is split across two chunks. Solution: increase overlap or use semantic chunking.
+
+Stale data: The index isn't updated when source documents change. Solution: implement incremental indexing and change detection.

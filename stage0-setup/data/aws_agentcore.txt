@@ -1,0 +1,112 @@
+Amazon Bedrock AgentCore: Platform Overview
+
+Amazon Bedrock AgentCore is a fully managed platform for deploying, running, and governing AI agents at production scale. It handles the infrastructure that every production agent needs — execution environment, memory, tool connectivity, identity management, and observability — so you can focus on agent logic.
+
+AgentCore is framework-agnostic (works with Strands Agents, LangGraph, custom Python) and model-agnostic (works with any Bedrock model or self-hosted model).
+
+--- AgentCore Runtime ---
+
+AgentCore Runtime is the core execution environment for agents. It provides:
+
+Serverless hosting: Your agent runs in a secure, isolated container. No servers to provision or scale. Billed by the CPU-second while your agent is actively processing.
+
+Session isolation: Each user conversation gets its own execution context. Sessions can persist for up to 8 hours, enabling long-running agentic workflows.
+
+Multiple invocation modes: Real-time (<1s) for chat interfaces. Streaming via WebSocket for progressive output. Async for multi-hour workflows.
+
+Framework support: Bring any Python-based agent framework. The runtime just needs a container image that responds to HTTP on port 8080.
+
+To deploy an agent to Runtime:
+1. Write your agent code (using Strands, LangGraph, or plain Python)
+2. Package it in a Docker container
+3. Push to Amazon ECR
+4. Create an AgentCore agent runtime pointing to your ECR image
+5. Invoke via the runtime's HTTPS endpoint
+
+--- AgentCore Memory ---
+
+Memory gives agents conversation continuity and the ability to learn from past interactions.
+
+Short-term memory: Maintains the conversation transcript within a session. Automatically managed by the runtime — no configuration needed.
+
+Long-term memory: Extracts and stores durable facts, preferences, and patterns from past interactions. Persists across sessions. When a user returns, the agent can recall previous context ("you mentioned last week you prefer Python examples").
+
+Long-term memory uses an extraction job that processes session transcripts and identifies memorable facts. These are stored in a managed semantic memory store and retrieved at the start of each new session.
+
+--- AgentCore Gateway ---
+
+Gateway converts your existing APIs, Lambda functions, and MCP servers into tools that agents can call. It acts as a standardized tool-connectivity layer.
+
+Lambda targets: Point Gateway at a Lambda function. The function automatically becomes an MCP-compatible tool with a discovered schema.
+
+API targets: Wrap any REST or HTTP API as an agent tool. Gateway handles authentication and schema discovery.
+
+MCP server federation: Connect to existing MCP servers and expose their tools to your agents.
+
+All tool calls flow through Gateway, which enables centralized auth, logging, and policy enforcement.
+
+--- AgentCore Identity ---
+
+Identity manages how agents authenticate to external services without embedding credentials in code.
+
+Workload identities: Each agent runtime gets an identity that can assume IAM roles for AWS service access.
+
+OAuth2 token exchange: Agents needing to call Salesforce, Jira, GitHub, or other OAuth2 services get tokens on demand without storing credentials.
+
+API key vault: Store and rotate API keys for services that don't support OAuth. The agent retrieves keys at call time.
+
+--- AgentCore Policy ---
+
+Policy provides deterministic, Cedar-based enforcement of what agents can and cannot do with tools.
+
+Without Policy: An agent could call any tool with any parameters. In production, that's a compliance and security gap.
+
+With Policy: You write Cedar rules that specify which tools agents can call and with what constraints. Examples:
+- "Agents may only call the refund tool if the amount is under $500"
+- "Agents in the customer-support group may not call the delete-account tool"
+- "Tool calls are only permitted during business hours"
+
+Policy enforcement happens at the Gateway boundary before the tool is ever invoked. Decisions are deterministic (not LLM-based) and fully auditable.
+
+--- AgentCore Observability ---
+
+Observability provides distributed tracing, metrics, and logs for agent behavior.
+
+Traces: Every agent turn generates an OpenTelemetry trace showing the full execution graph — model calls, tool invocations, memory lookups, and their durations.
+
+Integration: Traces are exported to AWS X-Ray. Metrics and logs go to CloudWatch. Third-party tools like Langfuse can receive traces via OTLP.
+
+The AgentCore SDK automatically instruments your agent code using the AWS Distro for OpenTelemetry. You get traces with zero code changes after initial setup.
+
+--- AgentCore Evaluations ---
+
+Evaluations provides a framework for testing and monitoring agent quality over time.
+
+Built-in evaluators: 13 pre-built evaluators covering correctness, faithfulness, relevance, toxicity, and more. No model configuration needed.
+
+Custom evaluators: Define your own scoring logic for domain-specific quality metrics.
+
+CI/CD integration: Run evaluations in your pipeline. Fail the build if quality drops below a threshold.
+
+Continuous monitoring: Run evaluations on a sample of production traffic to catch quality regressions before users notice.
+
+--- Multi-Agent Patterns ---
+
+AgentCore supports several patterns for agents that collaborate:
+
+Agent-to-Agent (A2A) protocol: A standard protocol for agents to discover and call each other across frameworks and teams. An agent exposes an Agent Card describing its capabilities; other agents find and invoke it via the A2A task lifecycle.
+
+Agents-as-tools: Register specialized agents as tools of a supervisor agent. The supervisor decides which specialist to delegate to based on the user's request.
+
+Bedrock Multi-Agent Collaboration: A managed orchestration layer where a supervisor agent coordinates collaborator agents. Best for teams using Bedrock-native agents throughout.
+
+--- Pricing Model ---
+
+AgentCore uses consumption-based pricing with no upfront commitment:
+- Runtime: billed per CPU-second and memory-second (1-second minimum)
+- Memory: billed per storage GB and retrieval operation
+- Gateway: billed per tool call and schema indexing operation
+- Observability: billed per telemetry volume (similar to CloudWatch pricing)
+- Evaluations: billed per evaluator invocation
+
+For most workshop and development workloads, the cost is minimal — a few dollars for a full day of testing.

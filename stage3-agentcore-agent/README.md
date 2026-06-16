@@ -6,7 +6,7 @@
 
 ## What You'll Build
 
-A Strands agent containerized and deployed to AgentCore Runtime. The agent autonomously decides when to call the knowledge base, maintains conversation state across turns, and runs at scale without infrastructure management.
+A Strands agent deployed to AgentCore Runtime using the **`agentcore` CLI** (the `bedrock-agentcore-starter-toolkit`). The CLI builds the container, pushes it to ECR, and creates the runtime for you — no Dockerfile and no local Docker required. The agent autonomously decides when to call the knowledge base, maintains conversation state across turns, and runs at scale without infrastructure management.
 
 ```
 You (HTTPS) → AgentCore Runtime → agent.py (Strands Agent)
@@ -20,9 +20,9 @@ You (HTTPS) → AgentCore Runtime → agent.py (Strands Agent)
 
 ## Prerequisites
 
-- Docker Desktop running (`docker info` should succeed)
-- Stage 2 complete (KNOWLEDGE_BASE_ID in `.env`)
-- AWS credentials with ECR and AgentCore permissions
+- Stage 2 complete (`KNOWLEDGE_BASE_ID` in `.env`)
+- AWS credentials with ECR, CodeBuild, and AgentCore permissions
+- Docker is **optional** — only needed if you deploy with `--local-build` instead of CodeBuild
 
 ---
 
@@ -30,7 +30,13 @@ You (HTTPS) → AgentCore Runtime → agent.py (Strands Agent)
 
 ```bash
 cd stage3-agentcore-agent
-pip install -r requirements.txt
+uv sync
+```
+
+This installs the `agentcore` CLI (`bedrock-agentcore-starter-toolkit`). Verify it:
+
+```bash
+uv run agentcore --version
 ```
 
 ---
@@ -39,10 +45,10 @@ pip install -r requirements.txt
 
 ### 01 — Setup IAM (`~2 min`)
 
-Creates the IAM execution role for AgentCore Runtime and an ECR repository for your container image.
+Creates the IAM execution role AgentCore Runtime assumes. (The ECR repository is created for you later by `agentcore launch` — no need to make one here.)
 
 ```bash
-python 01_setup_iam.py
+uv run 01_setup_iam.py
 ```
 
 **Watch for:**
@@ -52,35 +58,44 @@ python 01_setup_iam.py
 
 ---
 
-### 02 — Build and Deploy (`~8 min`)
+### 02 — Configure and Deploy (`~5 min`)
 
-Builds the Docker image, pushes to ECR, creates the AgentCore Runtime, and waits for it to become READY.
+Drives the `agentcore` CLI: `agentcore configure` generates `agent/.bedrock_agentcore.yaml`, then `agentcore launch` builds the image with CodeBuild, pushes to ECR, and creates the runtime. The script then reads the runtime ARN/ID back into `.env`.
 
 ```bash
-python 02_deploy_agent.py
+uv run 02_deploy_agent.py
 
-# If image already pushed (re-deploy only):
-python 02_deploy_agent.py --skip-build
+# Build locally with Docker instead of CodeBuild:
+uv run 02_deploy_agent.py --local-build
+```
+
+Equivalent manual commands (run inside `agent/`):
+
+```bash
+agentcore configure --entrypoint agent.py --name rag_workshop_agent \
+    --region us-east-1 --execution-role <AGENTCORE_EXECUTION_ROLE_ARN> --disable-memory
+agentcore launch
+agentcore invoke '{"prompt": "What is RAG?"}'
 ```
 
 **Watch for:**
-- Docker image size (strands-agents + boto3 = ~200MB compressed)
-- ECR push layers — Docker layer caching means re-deploys are fast
+- `agentcore configure` writes `agent/.bedrock_agentcore.yaml` — the deployment config
+- `agentcore launch` runs an AWS CodeBuild job (no local Docker) — it prints a log link
 - Runtime provisioning: typically 2-4 minutes for cold start
-- `networkConfiguration: PUBLIC` — the runtime gets a public HTTPS endpoint
+- The runtime gets a public HTTPS endpoint managed by AgentCore
 
 ---
 
 ### 03 — Chat with Agent (`open-ended`)
 
-Sends messages to the deployed runtime and renders responses.
+Sends messages to the deployed runtime and renders responses. Uses `AGENTCORE_RUNTIME_ARN` from `.env` and sends a `{"prompt": ...}` payload.
 
 ```bash
 # Interactive mode
-python 03_chat_with_agent.py
+uv run 03_chat_with_agent.py
 
 # Pre-scripted demo (good for presentations)
-python 03_chat_with_agent.py --demo
+uv run 03_chat_with_agent.py --demo
 ```
 
 **Watch for (demo mode):**
@@ -116,11 +131,31 @@ def summarize_topic(topic: str) -> str:
 
 The Strands `@tool` decorator auto-generates the JSON schema from the docstring and type hints, making the tool available to the LLM.
 
+The agent is wrapped with `BedrockAgentCoreApp`:
+
+```python
+from bedrock_agentcore import BedrockAgentCoreApp
+
+app = BedrockAgentCoreApp()
+
+@app.entrypoint
+def invoke(payload):
+    user_message = payload.get("prompt", "")
+    return {"result": str(agent(user_message))}
+
+if __name__ == "__main__":
+    app.run()
+```
+
+The `agentcore` CLI detects `@app.entrypoint` / `app.run()` and generates the container automatically — that's why there's no Dockerfile. Run it locally with `uv run agent/agent.py` and POST to `http://localhost:8080/invocations`.
+
+Dependencies live in `agent/pyproject.toml`; `agent/requirements.txt` is the export the CLI's container build consumes (regenerate with `uv export --no-hashes -o requirements.txt`).
+
 ---
 
 ## What AgentCore Runtime Adds vs Running Locally
 
-| Feature | Local (`python agent.py`) | AgentCore Runtime |
+| Feature | Local (`uv run agent/agent.py`) | AgentCore Runtime |
 |---|---|---|
 | Scale | Single process | Auto-scales per session |
 | Session isolation | Shared state | Each session isolated |
@@ -135,7 +170,7 @@ The Strands `@tool` decorator auto-generates the JSON schema from the docstring 
 ## Cleanup
 
 ```bash
-python cleanup.py
+uv run cleanup.py
 ```
 
-Deletes the AgentCore Runtime, ECR repository, and IAM role.
+Runs `agentcore destroy` (removes the AgentCore Runtime and the ECR repository the CLI created), then deletes the IAM execution role and clears the Stage 3 values from `.env`.

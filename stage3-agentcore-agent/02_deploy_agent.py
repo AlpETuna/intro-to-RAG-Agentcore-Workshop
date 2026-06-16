@@ -1,231 +1,169 @@
 #!/usr/bin/env python3
 """
-Stage 3, Script 2 — Build, Push, and Deploy Agent
+Stage 3, Script 2 — Configure and Deploy the Agent with the agentcore CLI
 
-1. Builds the Docker image from agent/Dockerfile
-2. Authenticates with ECR and pushes the image
-3. Creates an AgentCore Runtime pointing at the ECR image
-4. Waits for the runtime to become READY
-5. Saves the runtime ID and ARN to .env
+Instead of hand-building a Docker image and calling the AgentCore control-plane
+API directly, this uses the `agentcore` CLI (bedrock-agentcore-starter-toolkit):
 
-Prerequisites: Docker must be running.
+  1. `agentcore configure` — generates agent/.bedrock_agentcore.yaml
+  2. `agentcore launch`    — builds the image (AWS CodeBuild), pushes to ECR,
+                             and creates/updates the AgentCore Runtime
+  3. Reads the runtime ARN/ID back out of .bedrock_agentcore.yaml into .env
+
+No local Docker required — `agentcore launch` builds with CodeBuild by default.
 
 Usage:
     python 02_deploy_agent.py
-    python 02_deploy_agent.py --skip-build   (reuse existing ECR image)
+    python 02_deploy_agent.py --local-build   (build locally with Docker instead of CodeBuild)
 """
 
 import argparse
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-import boto3
-from botocore.exceptions import ClientError
+import yaml
 from dotenv import load_dotenv, set_key
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 ENV_FILE = Path(__file__).parent.parent / ".env"
 AGENT_DIR = Path(__file__).parent / "agent"
+AGENT_CONFIG = AGENT_DIR / ".bedrock_agentcore.yaml"
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-RUNTIME_NAME = "rag-workshop-agent"
+AGENT_NAME = "rag_workshop_agent"
 
 console = Console()
 
 
 def load_config():
     load_dotenv(ENV_FILE)
-    repo_uri = os.getenv("ECR_REPO_URI")
     role_arn = os.getenv("AGENTCORE_EXECUTION_ROLE_ARN")
     kb_id = os.getenv("KNOWLEDGE_BASE_ID", "")
-
-    if not repo_uri or not role_arn:
-        console.print("[red]Missing ECR_REPO_URI or AGENTCORE_EXECUTION_ROLE_ARN. Run 01_setup_iam.py first.[/red]")
+    if not role_arn:
+        console.print("[red]Missing AGENTCORE_EXECUTION_ROLE_ARN. Run 01_setup_iam.py first.[/red]")
         raise SystemExit(1)
-    return repo_uri, role_arn, kb_id
+    return role_arn, kb_id
 
 
-def run_cmd(cmd: list[str], description: str) -> subprocess.CompletedProcess:
-    console.print(f"  [dim]$ {' '.join(cmd[:4])}{'...' if len(cmd) > 4 else ''}[/dim]")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        console.print(f"  [red]Command failed:[/red] {result.stderr[:500]}")
-        raise SystemExit(1)
-    return result
-
-
-def build_and_push(repo_uri: str, account_id: str) -> str:
-    image_tag = f"{repo_uri}:latest"
-
-    console.print(f"\n[bold]Step 1/3 — Building Docker image[/bold]")
-    console.print(f"  From: {AGENT_DIR}")
-    run_cmd(
-        ["docker", "build", "-t", image_tag, str(AGENT_DIR)],
-        "Building container",
-    )
-    console.print(f"  [green]✓ Image built:[/green] {image_tag}")
-
-    console.print(f"\n[bold]Step 2/3 — Authenticating with ECR[/bold]")
-    ecr = boto3.client("ecr", region_name=AWS_REGION)
-    auth = ecr.get_authorization_token()
-    token = auth["authorizationData"][0]["authorizationToken"]
-    import base64
-    username, password = base64.b64decode(token).decode().split(":", 1)
-    registry = repo_uri.split("/")[0]
-
-    run_cmd(
-        ["docker", "login", "--username", username, "--password-stdin", registry],
-        "ECR login",
-    )
-    # Pass password via stdin
-    result = subprocess.run(
-        ["docker", "login", "--username", username, "--password-stdin", registry],
-        input=password,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0 and "Login Succeeded" not in result.stdout + result.stderr:
-        console.print(f"  [yellow]ECR login note:[/yellow] {result.stderr[:200]}")
-    console.print(f"  [green]✓ Authenticated with ECR[/green]")
-
-    console.print(f"\n[bold]Step 3/3 — Pushing image to ECR[/bold]")
-    run_cmd(["docker", "push", image_tag], "Pushing image")
-    console.print(f"  [green]✓ Pushed:[/green] {image_tag}")
-
-    return image_tag
-
-
-def create_agentcore_runtime(
-    bedrock_agentcore, repo_uri: str, role_arn: str, kb_id: str, account_id: str
-) -> dict:
-    image_tag = f"{repo_uri}:latest"
-    console.print(f"\n[bold]Creating AgentCore Runtime[/bold]")
-    console.print(f"  Name:      {RUNTIME_NAME}")
-    console.print(f"  Image:     {image_tag}")
-    console.print(f"  Role:      {role_arn}")
-
+def ensure_agentcore_cli():
     try:
-        response = bedrock_agentcore.create_agent_runtime(
-            agentRuntimeName=RUNTIME_NAME,
-            description="RAG Workshop agent with Bedrock KB search",
-            agentRuntimeArtifact={
-                "containerConfiguration": {
-                    "containerUri": image_tag,
-                }
-            },
-            roleArn=role_arn,
-            networkConfiguration={"networkMode": "PUBLIC"},
-            environmentVariables={
-                "KNOWLEDGE_BASE_ID": kb_id,
-                "AWS_REGION": AWS_REGION,
-            },
-            protocolConfiguration={"serverProtocol": "HTTP"},
+        subprocess.run(["agentcore", "--version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        console.print(
+            "[red]`agentcore` CLI not found.[/red] Install Stage 3 deps:\n"
+            "  [bold]uv sync[/bold]   (or: uv pip install bedrock-agentcore-starter-toolkit)"
         )
-        runtime = response["agentRuntime"]
-        console.print(f"  [green]✓ Runtime ID:[/green] {runtime['agentRuntimeId']}")
-        console.print(f"  [green]✓ Status:[/green] {runtime['status']}")
-        return runtime
-    except ClientError as e:
-        if "already exists" in str(e).lower():
-            console.print("  [yellow]Runtime already exists — updating...[/yellow]")
-            response = bedrock_agentcore.update_agent_runtime(
-                agentRuntimeId=RUNTIME_NAME,
-                agentRuntimeArtifact={
-                    "containerConfiguration": {"containerUri": image_tag}
-                },
-                roleArn=role_arn,
-                environmentVariables={
-                    "KNOWLEDGE_BASE_ID": kb_id,
-                    "AWS_REGION": AWS_REGION,
-                },
-            )
-            return response["agentRuntime"]
-        raise
+        raise SystemExit(1)
 
 
-def wait_for_runtime(bedrock_agentcore, runtime_id: str, timeout: int = 600):
-    console.print(f"\n[bold]Waiting for runtime to become READY[/bold] (up to {timeout}s)...")
-    start = time.time()
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Provisioning...", total=None)
-        while time.time() - start < timeout:
-            response = bedrock_agentcore.get_agent_runtime(agentRuntimeId=runtime_id)
-            runtime = response["agentRuntime"]
-            status = runtime["status"]
-            progress.update(task, description=f"Status: {status}")
-            if status == "READY":
-                console.print(f"  [green]✓ Runtime is READY[/green]")
-                return runtime
-            if "FAILED" in status or "ERROR" in status:
-                console.print(f"  [red]Runtime failed: {status}[/red]")
-                console.print(f"  {runtime.get('statusReasons', [])}")
-                raise SystemExit(1)
-            time.sleep(15)
-    raise TimeoutError("Runtime did not become READY in time")
+def run_cli(cmd: list[str], description: str):
+    console.print(f"\n[bold]{description}[/bold]")
+    console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
+    # Stream output so the user sees the CodeBuild/launch progress live.
+    result = subprocess.run(cmd, cwd=str(AGENT_DIR))
+    if result.returncode != 0:
+        console.print(f"  [red]Command failed (exit {result.returncode}).[/red]")
+        raise SystemExit(1)
 
 
-def save_env(runtime_id: str, runtime_arn: str, endpoint: str = ""):
+def configure(role_arn: str):
+    cmd = [
+        "agentcore", "configure",
+        "--entrypoint", "agent.py",
+        "--name", AGENT_NAME,
+        "--region", AWS_REGION,
+        "--execution-role", role_arn,
+        "--requirements-file", "requirements.txt",
+        # Stage 4 adds AgentCore Memory explicitly; keep it off for now.
+        "--disable-memory",
+    ]
+    run_cli(cmd, "Step 1/2 — agentcore configure (generates .bedrock_agentcore.yaml)")
+
+
+def launch(local_build: bool):
+    cmd = ["agentcore", "launch"]
+    if local_build:
+        cmd.append("--local-build")
+    run_cli(cmd, "Step 2/2 — agentcore launch (build → push → deploy → READY)")
+
+
+def read_runtime_from_config() -> tuple[str, str]:
+    """Pull the deployed runtime ARN/ID out of .bedrock_agentcore.yaml."""
+    if not AGENT_CONFIG.exists():
+        console.print(f"[red]{AGENT_CONFIG} not found — did configure run?[/red]")
+        raise SystemExit(1)
+
+    data = yaml.safe_load(AGENT_CONFIG.read_text()) or {}
+    agents = data.get("agents", {})
+    agent = agents.get(AGENT_NAME) or (next(iter(agents.values())) if agents else {})
+    bac = (agent or {}).get("bedrock_agentcore", {}) or {}
+
+    runtime_arn = bac.get("agent_arn", "")
+    runtime_id = bac.get("agent_id", "")
+    if not runtime_arn:
+        console.print(
+            "[yellow]Could not find agent_arn in .bedrock_agentcore.yaml.[/yellow]\n"
+            "Run [bold]agentcore status[/bold] in the agent/ directory to inspect it."
+        )
+    return runtime_arn, runtime_id
+
+
+def save_env(runtime_arn: str, runtime_id: str, kb_id: str):
     env_path = str(ENV_FILE)
-    set_key(env_path, "AGENTCORE_RUNTIME_ID", runtime_id)
-    set_key(env_path, "AGENTCORE_RUNTIME_ARN", runtime_arn)
-    if endpoint:
-        set_key(env_path, "AGENTCORE_ENDPOINT", endpoint)
-    console.print(f"\n  [green]✓ Saved to .env[/green]")
+    if runtime_arn:
+        set_key(env_path, "AGENTCORE_RUNTIME_ARN", runtime_arn)
+    if runtime_id:
+        set_key(env_path, "AGENTCORE_RUNTIME_ID", runtime_id)
+    # Re-record the KB id the agent should use (passed as a runtime env var below).
+    console.print("\n  [green]✓ Saved runtime details to .env[/green]")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skip-build", action="store_true", help="Skip Docker build/push")
+    parser.add_argument(
+        "--local-build", action="store_true",
+        help="Build the image locally with Docker instead of AWS CodeBuild",
+    )
     args = parser.parse_args()
 
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]Stage 3 — Deploy Agent to AgentCore Runtime[/bold cyan]\n"
-        "[dim]Build → Push → Deploy → Wait for READY[/dim]",
+        "[bold cyan]Stage 3 — Deploy Agent via agentcore CLI[/bold cyan]\n"
+        "[dim]configure → launch → read runtime ARN[/dim]",
         border_style="cyan",
     ))
 
-    repo_uri, role_arn, kb_id = load_config()
+    role_arn, kb_id = load_config()
+    ensure_agentcore_cli()
 
-    sts = boto3.client("sts", region_name=AWS_REGION)
-    account_id = sts.get_caller_identity()["Account"]
+    if not kb_id:
+        console.print("[yellow]Note: KNOWLEDGE_BASE_ID is empty — the agent's KB tools "
+                      "will return an error until Stage 2 is complete.[/yellow]")
 
-    bedrock_agentcore = boto3.client("bedrock-agentcore-control", region_name=AWS_REGION)
+    # The agent reads KNOWLEDGE_BASE_ID and AWS_REGION from its environment.
+    # `agentcore launch` passes through env vars set in the current shell.
+    os.environ["KNOWLEDGE_BASE_ID"] = kb_id
+    os.environ.setdefault("AWS_REGION", AWS_REGION)
 
-    if not args.skip_build:
-        build_and_push(repo_uri, account_id)
-    else:
-        console.print("[dim]Skipping Docker build (--skip-build)[/dim]")
+    configure(role_arn)
+    launch(args.local_build)
 
-    runtime = create_agentcore_runtime(bedrock_agentcore, repo_uri, role_arn, kb_id, account_id)
-    runtime_id = runtime["agentRuntimeId"]
-    runtime_arn = runtime["agentRuntimeArn"]
-
-    runtime = wait_for_runtime(bedrock_agentcore, runtime_id)
-
-    endpoint = runtime.get("agentRuntimeEndpoint", "")
-    save_env(runtime_id, runtime_arn, endpoint)
+    runtime_arn, runtime_id = read_runtime_from_config()
+    save_env(runtime_arn, runtime_id, kb_id)
 
     console.print()
     console.print(Panel(
         "[green]Agent deployed to AgentCore Runtime![/green]\n\n"
-        f"  Runtime ID:   {runtime_id}\n"
-        f"  Runtime ARN:  {runtime_arn[:70]}…\n"
-        f"  Endpoint:     {endpoint or '(check console)'}\n\n"
-        "What AgentCore Runtime provides:\n"
-        "  ✓ Session isolation (each user gets their own execution context)\n"
-        "  ✓ Auto-scaling (new container per concurrent session)\n"
-        "  ✓ Secure execution (IAM role, no shared state)\n"
-        "  ✓ HTTPS endpoint (no API Gateway needed)\n\n"
+        f"  Runtime ARN:  {runtime_arn or '(check: agentcore status)'}\n"
+        f"  Runtime ID:   {runtime_id or '(check: agentcore status)'}\n\n"
+        "What the agentcore CLI did for you:\n"
+        "  ✓ Generated agent/.bedrock_agentcore.yaml (deployment config)\n"
+        "  ✓ Built the container with CodeBuild and pushed to ECR\n"
+        "  ✓ Created the AgentCore Runtime with your execution role\n\n"
+        "Quick test:\n"
+        "  [bold]cd agent && agentcore invoke '{\"prompt\": \"What is RAG?\"}'[/bold]\n\n"
         "Next step:\n"
         "  [bold]python 03_chat_with_agent.py[/bold]",
         title="Done",

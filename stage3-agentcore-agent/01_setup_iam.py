@@ -3,12 +3,14 @@
 Stage 3, Script 1 — Setup IAM for AgentCore
 
 Creates the IAM execution role that the AgentCore Runtime assumes when
-running your agent container. This role needs:
+running your agent. This role needs:
   - Bedrock invocation permissions (for the LLM and KB)
   - ECR pull permissions (to pull the agent container image)
   - CloudWatch Logs permissions (for runtime logging)
 
-Also creates an ECR repository for the agent image.
+The `agentcore` CLI creates the ECR repository for you during `agentcore
+launch`, so we no longer create one here — we just provide the execution role
+so the runtime gets least-privilege, scoped permissions.
 
 Usage:
     python 01_setup_iam.py
@@ -28,7 +30,6 @@ from rich.table import Table
 
 ENV_FILE = Path(__file__).parent.parent / ".env"
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-ECR_REPO_NAME = "rag-workshop-agent"
 
 console = Console()
 
@@ -141,41 +142,19 @@ def create_agentcore_execution_role(iam, account_id: str) -> str:
     return role_arn
 
 
-def create_ecr_repo(ecr, account_id: str) -> str:
-    console.print(f"\n[bold]Creating ECR repository:[/bold] {ECR_REPO_NAME}")
-    try:
-        response = ecr.create_repository(
-            repositoryName=ECR_REPO_NAME,
-            imageScanningConfiguration={"scanOnPush": True},
-            encryptionConfiguration={"encryptionType": "AES256"},
-        )
-        repo_uri = response["repository"]["repositoryUri"]
-        console.print(f"  [green]✓ Created:[/green] {repo_uri}")
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "RepositoryAlreadyExistsException":
-            repo_uri = ecr.describe_repositories(
-                repositoryNames=[ECR_REPO_NAME]
-            )["repositories"][0]["repositoryUri"]
-            console.print(f"  [yellow]Already exists:[/yellow] {repo_uri}")
-        else:
-            raise
-    return repo_uri
-
-
-def save_env(role_arn: str, repo_uri: str):
+def save_env(role_arn: str):
     env_path = str(ENV_FILE)
     if not Path(ENV_FILE).exists():
         Path(ENV_FILE).write_text("")
     set_key(env_path, "AGENTCORE_EXECUTION_ROLE_ARN", role_arn)
-    set_key(env_path, "ECR_REPO_URI", repo_uri)
-    console.print(f"\n  [green]✓ Saved to .env:[/green] AGENTCORE_EXECUTION_ROLE_ARN, ECR_REPO_URI")
+    console.print(f"\n  [green]✓ Saved to .env:[/green] AGENTCORE_EXECUTION_ROLE_ARN")
 
 
 def main():
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]Stage 3 — Setup IAM & ECR[/bold cyan]\n"
-        "[dim]Execution role + container registry for AgentCore Runtime[/dim]",
+        "[bold cyan]Stage 3 — Setup IAM[/bold cyan]\n"
+        "[dim]Execution role for AgentCore Runtime[/dim]",
         border_style="cyan",
     ))
 
@@ -183,7 +162,6 @@ def main():
 
     sts = boto3.client("sts", region_name=AWS_REGION)
     iam = boto3.client("iam", region_name=AWS_REGION)
-    ecr = boto3.client("ecr", region_name=AWS_REGION)
 
     account_id = get_account_id(sts)
     console.print(f"\n  AWS Account: [bold]{account_id}[/bold]")
@@ -205,21 +183,20 @@ def main():
     ))
 
     role_arn = create_agentcore_execution_role(iam, account_id)
-    repo_uri = create_ecr_repo(ecr, account_id)
-    save_env(role_arn, repo_uri)
+    save_env(role_arn)
 
     table = Table("Resource", "Value", header_style="bold magenta")
     table.add_row("Execution Role", role_arn)
-    table.add_row("ECR Repository", repo_uri)
     console.print()
     console.print(table)
 
     console.print()
     console.print(Panel(
-        "[green]IAM and ECR ready![/green]\n\n"
-        "Next step — build and push the agent Docker image:\n\n"
+        "[green]Execution role ready![/green]\n\n"
+        "Next step — configure and deploy the agent with the agentcore CLI:\n\n"
         "  [bold]python 02_deploy_agent.py[/bold]\n\n"
-        "[dim]This step requires Docker to be running.[/dim]",
+        "[dim]No Docker needed — the agentcore CLI builds the image with "
+        "AWS CodeBuild and creates the ECR repository for you.[/dim]",
         title="Done",
         border_style="green",
     ))

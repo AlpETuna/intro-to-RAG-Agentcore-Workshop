@@ -20,7 +20,7 @@ S3 Bucket (docs) → Bedrock KB (ingestion job) → OpenSearch Serverless (HNSW)
 
 ```bash
 cd stage2-bedrock-kb
-pip install -r requirements.txt
+uv sync
 ```
 
 ---
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 Creates the S3 bucket, uploads the 5 workshop documents, and creates the IAM service role that Bedrock will use to access S3 and OpenSearch.
 
 ```bash
-python 01_create_infrastructure.py
+uv run 01_create_infrastructure.py
 ```
 
 **Watch for:**
@@ -47,7 +47,7 @@ python 01_create_infrastructure.py
 Creates the Bedrock Knowledge Base with an OpenSearch Serverless vector store. **This takes 5–8 minutes** while the OpenSearch collection provisions.
 
 ```bash
-python 02_create_knowledge_base.py
+uv run 02_create_knowledge_base.py
 ```
 
 **Watch for:**
@@ -63,13 +63,13 @@ python 02_create_knowledge_base.py
 Triggers the ingestion job (Bedrock chunks, embeds, and indexes the S3 documents), waits for completion, then runs queries using both APIs.
 
 ```bash
-python 03_sync_and_query.py
+uv run 03_sync_and_query.py
 
 # If the KB was already synced in a previous run:
-python 03_sync_and_query.py --skip-sync
+uv run 03_sync_and_query.py --skip-sync
 
 # Custom query:
-python 03_sync_and_query.py --query "What is hybrid search?"
+uv run 03_sync_and_query.py --query "What is hybrid search?"
 ```
 
 **Watch for:**
@@ -85,7 +85,7 @@ python 03_sync_and_query.py --query "What is hybrid search?"
 Runs the same questions through both Stage 1 (FAISS) and Stage 2 (Bedrock KB) and renders side-by-side panels.
 
 ```bash
-python 04_compare_approaches.py
+uv run 04_compare_approaches.py
 ```
 
 **Watch for:**
@@ -128,7 +128,7 @@ The `retrieve_and_generate()` API returns citations — mappings from answer sen
 **Run this when done** to stop OpenSearch Serverless charges:
 
 ```bash
-python cleanup.py
+uv run cleanup.py
 ```
 
 ---

@@ -5,11 +5,10 @@ Stage 0 — Prerequisites Check
 Run this first. It verifies your Python version, AWS CLI installation,
 AWS login status, Bedrock model access, and optional tools (Docker, agentcore-cli).
 
-If you are not logged in, it will offer to run `aws sso login` for you.
+If you are not logged in, it tells you to run `aws login`.
 
 Usage:
     python 00_check_prerequisites.py
-    python 00_check_prerequisites.py --login   (trigger aws sso login immediately)
 """
 
 import sys
@@ -27,8 +26,8 @@ console = Console()
 
 REQUIRED_MODELS = [
     ("amazon.titan-embed-text-v2:0", "Stage 1–4 embeddings"),
-    ("anthropic.claude-3-haiku-20240307-v1:0", "Stage 1 generation"),
-    ("anthropic.claude-3-5-sonnet-20241022-v2:0", "Stage 3–4 agent reasoning"),
+    ("us.anthropic.claude-haiku-4-5-20251001-v1:0", "Stage 1 generation"),
+    ("us.anthropic.claude-sonnet-4-6", "Stage 3–4 agent reasoning"),
 ]
 
 REQUIRED_PACKAGES = [
@@ -64,7 +63,7 @@ def check_packages(packages: list) -> list:
     for module, label in packages:
         spec = importlib.util.find_spec(module)
         ok = spec is not None
-        detail = "installed" if ok else f"pip install {module.replace('dotenv', 'python-dotenv').replace('faiss', 'faiss-cpu')}"
+        detail = "installed" if ok else f"uv pip install {module.replace('dotenv', 'python-dotenv').replace('faiss', 'faiss-cpu')}"
         results.append(check(label, ok, detail))
     return results
 
@@ -93,58 +92,29 @@ def check_aws_cli() -> list:
         return [check("AWS CLI v2", False, str(e))]
 
 
-def get_sso_profiles() -> list[str]:
-    """Return SSO-configured profile names from ~/.aws/config."""
-    config_path = Path.home() / ".aws" / "config"
-    if not config_path.exists():
-        return []
-    profiles = []
-    current_profile = None
-    is_sso = False
-    for line in config_path.read_text().splitlines():
-        line = line.strip()
-        if line.startswith("["):
-            if current_profile and is_sso:
-                profiles.append(current_profile)
-            name = line.strip("[]").replace("profile ", "")
-            current_profile = name
-            is_sso = False
-        elif "sso_start_url" in line or "sso_account_id" in line:
-            is_sso = True
-    if current_profile and is_sso:
-        profiles.append(current_profile)
-    return profiles
-
-
-def run_sso_login(profile: str = None) -> bool:
-    """Run aws sso login [--profile <name>] interactively."""
-    cmd = ["aws", "sso", "login"]
-    if profile:
-        cmd += ["--profile", profile]
-    console.print(f"\n  [cyan]Running:[/cyan] {' '.join(cmd)}")
-    console.print("  [dim]Your browser will open to complete the login.[/dim]\n")
-    result = subprocess.run(cmd)
-    return result.returncode == 0
-
-
 def check_aws_credentials() -> list:
     """Verify boto3 can make an authenticated AWS call."""
     try:
         import boto3
-        sts = boto3.client("sts")
+        # Give STS an explicit region so we never hit NoRegionError when no
+        # default region is configured (aws login does not set one).
+        region = boto3.session.Session().region_name or "us-east-1"
+        sts = boto3.client("sts", region_name=region)
         identity = sts.get_caller_identity()
         account = identity["Account"]
         arn = identity["Arn"]
-        auth_type = "SSO" if ":assumed-role/" in arn or "AWSReservedSSO" in arn else "IAM"
-        return [check("AWS login", True, f"Account {account} ({auth_type}) | {arn.split('/')[-1]}")]
+        return [check("AWS login", True, f"Account {account} | {arn.split('/')[-1]}")]
     except Exception as e:
         err = str(e)
-        if "token" in err.lower() or "expired" in err.lower() or "sso" in err.lower():
-            hint = "Token expired — run: aws sso login"
-        elif "credential" in err.lower() or "NoCredentials" in err:
-            hint = "Not logged in — run: aws sso login  (or aws configure)"
+        low = err.lower()
+        if "missingdependency" in low or "botocore[crt]" in low or "crt" in low:
+            hint = 'Run: uv pip install "botocore[crt]"  (needed for aws login)'
+        elif "nocredentials" in low or "unable to locate credentials" in low \
+                or "token" in low or "expired" in low or "sso" in low:
+            hint = "Not logged in — run: aws login"
         else:
-            hint = err[:80]
+            # Surface the real error (with its type) so it can be diagnosed.
+            hint = f"{type(e).__name__}: {err}"[:90]
         return [check("AWS login", False, hint)]
 
 
@@ -185,10 +155,11 @@ def check_bedrock_models(region: str = "us-east-1") -> list:
                 )
                 results.append(check(f"Model: {model_id}", True, purpose))
             except bedrock_rt.exceptions.AccessDeniedException:
-                results.append(check(
-                    f"Model: {model_id}", False,
-                    f"Enable in Bedrock Console → Model access ({purpose})"
-                ))
+                if model_id.startswith("anthropic") or ".anthropic." in model_id:
+                    hint = f"Submit the one-time Anthropic usage form in the Bedrock playground ({purpose})"
+                else:
+                    hint = f"Check your IAM bedrock:InvokeModel permission ({purpose})"
+                results.append(check(f"Model: {model_id}", False, hint))
             except Exception as e:
                 results.append(check(f"Model: {model_id}", False, str(e)[:80]))
     except Exception as e:
@@ -202,12 +173,13 @@ def check_docker() -> list:
             ["docker", "--version"], capture_output=True, text=True, timeout=5
         )
         ok = result.returncode == 0
-        detail = result.stdout.strip() if ok else "Install Docker Desktop"
-        return [check("Docker (Stage 3)", ok, detail)]
+        detail = result.stdout.strip() if ok else "Optional — agentcore launch uses CodeBuild"
+        return [check("Docker (optional)", ok, detail)]
     except FileNotFoundError:
-        return [check("Docker (Stage 3)", False, "Not found — needed for Stage 3 only")]
+        return [check("Docker (optional)", False,
+                      "Optional — only needed for `agentcore launch --local-build`")]
     except Exception as e:
-        return [check("Docker (Stage 3)", False, str(e))]
+        return [check("Docker (optional)", False, str(e))]
 
 
 def check_agentcore_cli() -> list:
@@ -216,10 +188,11 @@ def check_agentcore_cli() -> list:
             ["agentcore", "--version"], capture_output=True, text=True, timeout=5
         )
         ok = result.returncode == 0
-        detail = result.stdout.strip() if ok else "pip install agentcore-cli"
+        detail = result.stdout.strip() if ok else "uv pip install bedrock-agentcore-starter-toolkit"
         return [check("agentcore-cli (Stage 3)", ok, detail)]
     except FileNotFoundError:
-        return [check("agentcore-cli (Stage 3)", False, "Optional — pip install agentcore-cli")]
+        return [check("agentcore-cli (Stage 3)", False,
+                      "Stage 3 only — uv pip install bedrock-agentcore-starter-toolkit")]
     except Exception as e:
         return [check("agentcore-cli (Stage 3)", False, str(e))]
 
@@ -243,12 +216,6 @@ def check_data_files() -> list:
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Stage 0 prerequisites check")
-    parser.add_argument("--login", action="store_true",
-                        help="Run aws sso login before checking credentials")
-    args = parser.parse_args()
-
     console.print()
     console.print(Panel.fit(
         "[bold cyan]Intro to RAG with AgentCore[/bold cyan]\n"
@@ -256,25 +223,6 @@ def main():
         border_style="cyan",
     ))
     console.print()
-
-    # ── Early: offer SSO login if --login flag passed ─────────────────────────
-    if args.login:
-        sso_profiles = get_sso_profiles()
-        if sso_profiles:
-            console.print(Panel(
-                f"SSO profiles found: [bold]{', '.join(sso_profiles)}[/bold]\n\n"
-                "Launching login for the first profile…",
-                title="AWS SSO Login",
-                border_style="cyan",
-            ))
-            ok = run_sso_login(sso_profiles[0])
-        else:
-            console.print("[dim]No SSO profiles found — running default aws sso login[/dim]")
-            ok = run_sso_login()
-        if not ok:
-            console.print("[red]Login failed. Check your SSO configuration and try again.[/red]")
-            sys.exit(1)
-        console.print("[green]Login succeeded![/green] Re-running checks…\n")
 
     table = Table(
         title="Environment Check",
@@ -358,23 +306,14 @@ def main():
         if not any(skip in r[0] for skip in ("Stage 3", "Docker", "agentcore-cli", "Strands"))
     ]
 
-    # ── Surface SSO login hint if credentials are the blocker ─────────────────
+    # ── Surface login hint if credentials are the blocker ────────────────────
     login_blocked = any("AWS login" in r[0] for r in critical_fails)
-    if login_blocked and not args.login:
-        sso_profiles = get_sso_profiles()
-        if sso_profiles:
-            login_hint = (
-                f"SSO profile(s) detected: [bold]{', '.join(sso_profiles)}[/bold]\n\n"
-                f"  Run:  [bold]python 00_check_prerequisites.py --login[/bold]\n"
-                f"  Or:   [bold]aws sso login --profile {sso_profiles[0]}[/bold]"
-            )
-        else:
-            login_hint = (
-                "No SSO profile found. Options:\n\n"
-                "  [bold]aws configure sso[/bold]          — set up SSO (recommended)\n"
-                "  [bold]aws configure[/bold]               — use static access keys\n"
-                "  [bold]aws sso login[/bold]               — login to existing SSO config"
-            )
+    if login_blocked:
+        login_hint = (
+            "You are not logged in to AWS. Run:\n\n"
+            "  [bold]aws login[/bold]\n\n"
+            "and make sure your default region is us-east-1."
+        )
         console.print()
         console.print(Panel(login_hint, title="How to Log In", border_style="cyan"))
 
@@ -383,8 +322,8 @@ def main():
         console.print(Panel(
             "[green]All critical checks passed![/green]\n\n"
             "Next step:\n"
-            "  [bold]cd ../stage1-basic-rag && pip install -r requirements.txt[/bold]\n"
-            "  [bold]python 01_chunk_and_embed.py[/bold]",
+            "  [bold]cd ../stage1-basic-rag && uv sync[/bold]\n"
+            "  [bold]uv run 01_chunk_and_embed.py[/bold]",
             title="Ready to Start",
             border_style="green",
         ))

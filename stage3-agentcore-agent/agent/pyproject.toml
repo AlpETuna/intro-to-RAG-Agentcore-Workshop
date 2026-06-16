@@ -1,0 +1,18 @@
+[project]
+name = "rag-workshop-agent"
+version = "0.1.0"
+description = "RAG agent that runs inside AgentCore Runtime"
+requires-python = ">=3.10"
+dependencies = [
+    "bedrock-agentcore>=0.1.0",
+    "strands-agents>=0.1.0",
+    "strands-agents-tools>=0.1.0",
+    "boto3>=1.38.0",
+]
+
+[tool.uv]
+package = false
+
+# NOTE: requirements.txt in this directory is the source the `agentcore`
+# CLI uses to build the runtime container image. Keep it in sync with the
+# dependencies above, e.g.:  uv export --no-hashes -o requirements.txt

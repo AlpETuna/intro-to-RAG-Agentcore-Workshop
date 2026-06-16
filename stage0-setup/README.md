@@ -7,7 +7,7 @@
 ## What You'll Do
 
 1. Install the AWS CLI
-2. Log in with `aws sso login`
+2. Log in with `aws login`
 3. Install Python dependencies
 4. Verify Bedrock model access
 5. Understand the five sample documents used throughout the workshop
@@ -48,35 +48,13 @@ aws --version
 
 ### 2. Log in to AWS
 
-The recommended approach is AWS IAM Identity Center (SSO). If your account is already configured for SSO:
+Log in to AWS with:
 
 ```bash
-# If you have an SSO profile already set up:
-aws sso login --profile <your-profile-name>
-
-# Or let the prerequisite script trigger it for you:
-python 00_check_prerequisites.py --login
+aws login
 ```
 
-**First time setting up SSO?** Run the guided setup:
-```bash
-aws configure sso
-# SSO session name: workshop
-# SSO start URL:    https://<your-org>.awsapps.com/start
-# SSO region:       us-east-1
-# Follow the browser prompt to authenticate
-```
-
-**Alternative — static access keys** (if your organisation uses IAM users):
-```bash
-aws configure
-# AWS Access Key ID:     <your key>
-# AWS Secret Access Key: <your secret>
-# Default region name:   us-east-1
-# Default output format: json
-```
-
-Verify the login worked:
+Make sure your default region is set to `us-east-1`. Verify the login worked:
 ```bash
 aws sts get-caller-identity
 # {
@@ -87,40 +65,49 @@ aws sts get-caller-identity
 
 ---
 
-### 3. Create a virtual environment
+### 3. Install uv
+
+This workshop uses [uv](https://docs.astral.sh/uv/) to manage Python and dependencies. Each stage is its own `pyproject.toml` project.
 
 ```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
 # macOS / Linux
-source .venv/bin/activate
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Verify
+uv --version
 ```
+
+uv creates and manages the virtual environment for you — no `python -m venv` needed.
 
 ---
 
 ### 4. Install Python dependencies
 
 ```bash
-# From the repo root
-pip install -r requirements.txt
+# Stage 0 deps (from this directory)
+uv sync
 
-# Stage 1 deps (install now so they're ready)
-pip install -r stage1-basic-rag/requirements.txt
+# uv created a .venv here. Run scripts with `uv run` so they use it:
+uv run 00_check_prerequisites.py
 ```
+
+Each stage has its own `pyproject.toml`; `cd` into a stage and run `uv sync` before working in it.
 
 ---
 
-### 5. Enable Bedrock model access
+### 5. Bedrock model access
 
-Open [Bedrock Console → Model access](https://us-east-1.console.aws.amazon.com/bedrock/home#/modelaccess) and enable:
-- **Amazon → Titan Text Embeddings V2**
-- **Anthropic → Claude 3 Haiku**
-- **Anthropic → Claude 3.5 Sonnet v2**
+The old **Model access** page is retired — serverless foundation models are now **automatically enabled** in every account/region. Access is controlled by IAM (`bedrock:InvokeModel`), which `AmazonBedrockFullAccess` grants.
 
-Model access propagates within 1–2 minutes.
+The workshop uses:
+- **Amazon → Titan Text Embeddings V2** — ready to use, no action needed
+- **Anthropic → Claude Haiku 4.5**
+- **Anthropic → Claude Sonnet 4.6**
+
+**One thing to do:** Anthropic (Claude) models require a one-time usage form before first use. Open the [Bedrock Chat / Playground](https://us-east-1.console.aws.amazon.com/bedrock/home#/chat-playground), pick a Claude model, and complete the short form it prompts. Access is granted immediately.
 
 ---
 
@@ -137,14 +124,10 @@ cp .env.example .env   # Windows: copy .env.example .env
 
 ```bash
 cd stage0-setup
-python 00_check_prerequisites.py
+uv run 00_check_prerequisites.py
 ```
 
-If credentials are missing, the script detects your SSO profile and prints the exact login command. You can also pass `--login` to trigger it automatically:
-
-```bash
-python 00_check_prerequisites.py --login
-```
+If credentials are missing, the script prints the exact login command (`aws login`).
 
 ---
 
@@ -195,17 +178,14 @@ Five documents live in `stage0-setup/data/`. They're used as the knowledge base 
 **`AWS CLI v2` check fails**
 The CLI is not installed or on PATH. Follow Step 1 above, then open a new terminal.
 
-**`AWS login` check fails — "Token expired"**
-Your SSO session has expired. Re-run: `aws sso login --profile <your-profile>` or `python 00_check_prerequisites.py --login`
-
 **`AWS login` check fails — "No credentials"**
-You haven't logged in yet. Follow Step 2 above. If you don't have SSO configured, run `aws configure` with static access keys.
+You haven't logged in yet. Run `aws login` (Step 2 above).
 
 **`AWS region configured` is FAIL**
-Add `AWS_DEFAULT_REGION=us-east-1` to your `.env` file, or set it in your SSO profile (`~/.aws/config`).
+Add `AWS_DEFAULT_REGION=us-east-1` to your `.env` file, or set your default region to `us-east-1`.
 
-**Model status is `FAIL` after enabling access**
-Wait 2 minutes and re-run. Model access propagation can take a moment.
+**Model status is `FAIL` for a Claude model**
+You likely haven't submitted the one-time Anthropic usage form yet — open the Bedrock Chat / Playground, select a Claude model, complete the form, then re-run. For non-Anthropic models, a `FAIL` means your IAM role is missing `bedrock:InvokeModel`.
 
 **`ModuleNotFoundError: No module named 'faiss'`**
-Run `pip install faiss-cpu` — this is normal if you haven't installed Stage 1 deps yet.
+This is normal if you haven't installed Stage 1 deps yet — run `uv sync` inside `stage1-basic-rag/`.

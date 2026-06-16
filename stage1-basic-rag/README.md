@@ -22,7 +22,7 @@ User Query → Titan Embed V2 → Similarity Search → Top-K Chunks
 
 ```bash
 cd stage1-basic-rag
-pip install -r requirements.txt
+uv sync
 ```
 
 ---
@@ -34,7 +34,7 @@ pip install -r requirements.txt
 Loads all 5 documents from `stage0-setup/data/`, splits them into overlapping chunks, embeds each chunk with Titan Embed V2, and saves a FAISS index to disk.
 
 ```bash
-python 01_chunk_and_embed.py
+uv run 01_chunk_and_embed.py
 ```
 
 **Watch for:**
@@ -55,10 +55,10 @@ python 01_chunk_and_embed.py
 Runs 5 demo queries against the FAISS index and shows ranked results with similarity scores.
 
 ```bash
-python 02_retrieve.py
+uv run 02_retrieve.py
 
 # Or run a custom query
-python 02_retrieve.py --query "What is hybrid search?" --top-k 5
+uv run 02_retrieve.py --query "What is hybrid search?" --top-k 5
 ```
 
 **Watch for:**
@@ -75,13 +75,13 @@ python 02_retrieve.py --query "What is hybrid search?" --top-k 5
 Runs 5 test questions through the complete pipeline: embed → retrieve → prompt → generate. Prints every step.
 
 ```bash
-python 03_rag_pipeline.py
+uv run 03_rag_pipeline.py
 
 # Show the full constructed prompt (important!)
-python 03_rag_pipeline.py --show-prompt
+uv run 03_rag_pipeline.py --show-prompt
 
 # Single question
-python 03_rag_pipeline.py --query "What is chunking?" --show-prompt
+uv run 03_rag_pipeline.py --query "What is chunking?" --show-prompt
 ```
 
 **Watch for:**
@@ -97,10 +97,10 @@ python 03_rag_pipeline.py --query "What is chunking?" --show-prompt
 Multi-turn RAG conversation. Each message triggers fresh retrieval. History is included in the prompt for follow-up questions.
 
 ```bash
-python 04_interactive_chat.py
+uv run 04_interactive_chat.py
 
 # Retrieve more chunks per turn
-python 04_interactive_chat.py --top-k 5
+uv run 04_interactive_chat.py --top-k 5
 ```
 
 **Try these conversation flows:**

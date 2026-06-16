@@ -1,25 +1,26 @@
 """
-Stage 3 — RAG Agent (runs inside AgentCore Runtime container)
+Stage 3 — RAG Agent (runs inside AgentCore Runtime)
 
-This is the agent code that runs INSIDE the Docker container deployed to
-AgentCore Runtime. It uses Strands Agents for the agent framework and
-exposes two tools:
+This is the agent code that runs INSIDE the container the `agentcore` CLI
+builds and deploys to AgentCore Runtime. It uses Strands Agents for the agent
+framework and exposes two tools:
   - search_knowledge_base: retrieves chunks from the Bedrock KB
   - summarize_topic: retrieves and summarizes a topic in a structured format
 
-The AgentCore SDK wraps this agent to handle HTTP requests, session
-management, and the runtime protocol.
+`BedrockAgentCoreApp` wraps this agent to handle HTTP requests, session
+management, and the runtime protocol. The `agentcore` CLI detects the
+`@app.entrypoint` function and `app.run()` automatically — no Dockerfile needed.
 
 Environment variables (injected by AgentCore Runtime):
   KNOWLEDGE_BASE_ID   — set in the runtime configuration
   AWS_REGION          — set in the runtime configuration
 """
 
-import json
 import logging
 import os
 
 import boto3
+from bedrock_agentcore import BedrockAgentCoreApp
 from strands import Agent, tool
 from strands.models import BedrockModel
 
@@ -176,37 +177,40 @@ def create_agent() -> Agent:
     )
 
 
+app = BedrockAgentCoreApp()
 agent = create_agent()
 
 
-def handle_request(payload: dict) -> str:
-    """Entry point called by the AgentCore Runtime SDK."""
-    user_message = payload.get("inputText") or payload.get("input") or ""
+@app.entrypoint
+def invoke(payload: dict) -> dict:
+    """Entry point called by AgentCore Runtime for each invocation.
+
+    The runtime delivers the request body as `payload`; the convention used
+    by the agentcore CLI (`agentcore invoke '{"prompt": "..."}'`) is the
+    `prompt` key. We also accept `inputText`/`input` for compatibility.
+    """
+    user_message = (
+        payload.get("prompt")
+        or payload.get("inputText")
+        or payload.get("input")
+        or ""
+    )
     if not user_message:
-        return json.dumps({"error": "No input provided"})
+        return {"error": "No input provided. Send a JSON body with a 'prompt' field."}
 
     logger.info(f"Processing: {user_message[:100]}")
 
     try:
-        response = agent(user_message)
-        return json.dumps({"response": str(response)})
+        result = agent(user_message)
+        return {"result": str(result)}
     except Exception as e:
         logger.error(f"Agent error: {e}")
-        return json.dumps({"error": str(e)})
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":
-    # Local testing — run the agent in a simple REPL
-    print("RAG Agent (local mode) — type 'quit' to exit")
-    test_agent = create_agent()
-    while True:
-        try:
-            user_input = input("\nYou: ").strip()
-            if user_input.lower() in ("quit", "exit"):
-                break
-            if not user_input:
-                continue
-            response = test_agent(user_input)
-            print(f"\nAgent: {response}")
-        except KeyboardInterrupt:
-            break
+    # Starts the local HTTP server (also how the runtime launches the agent).
+    # Test locally with:
+    #   curl -X POST http://localhost:8080/invocations \
+    #        -H 'Content-Type: application/json' -d '{"prompt": "What is RAG?"}'
+    app.run()

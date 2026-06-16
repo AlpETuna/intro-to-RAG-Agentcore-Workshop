@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Skill(aws-dev-toolkit:agentcore)"
+      "Skill(aws-dev-toolkit:agentcore)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(../.venv/bin/python -c ' *)",
+      "Bash(../.venv/bin/python -c \"import boto3,botocore;print\\('boto3',boto3.__version__\\);print\\('botocore',botocore.__version__\\)\")",
+      "Bash(.venv/bin/python *)",
+      "Bash(/Users/alptuna/Documents/GitHub/intro-to-RAG-Agentcore-Workshop/.venv/bin/python *)",
+      "Bash(/Users/alptuna/Documents/GitHub/intro-to-RAG-Agentcore-Workshop/.venv/bin/pip install *)",
+      "WebSearch",
+      "WebFetch(domain:aws.amazon.com)",
+      "WebFetch(domain:aws.github.io)",
+      "Bash(command -v uv)",
+      "Bash(uv --version)",
+      "Bash(uv sync *)",
+      "Read(//private/tmp/**)",
+      "Bash(timeout 120 uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)",
+      "Bash(timeout 150 uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)",
+      "Bash(uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)"
     ]
   }
 }

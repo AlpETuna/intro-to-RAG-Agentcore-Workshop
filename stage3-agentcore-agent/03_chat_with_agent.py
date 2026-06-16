@@ -44,23 +44,28 @@ DEMO_SCRIPT = [
 ]
 
 
+def new_session_id() -> str:
+    # AgentCore Runtime requires runtimeSessionId to be at least 33 characters.
+    return f"workshop-{uuid.uuid4().hex}{uuid.uuid4().hex[:8]}"
+
+
 def load_config():
     load_dotenv(ENV_FILE)
-    runtime_id = os.getenv("AGENTCORE_RUNTIME_ID")
-    if not runtime_id:
-        console.print("[red]AGENTCORE_RUNTIME_ID not set. Run 02_deploy_agent.py first.[/red]")
+    runtime_arn = os.getenv("AGENTCORE_RUNTIME_ARN")
+    if not runtime_arn:
+        console.print("[red]AGENTCORE_RUNTIME_ARN not set. Run 02_deploy_agent.py first.[/red]")
         raise SystemExit(1)
-    return runtime_id
+    return runtime_arn
 
 
-def invoke_agent(client, runtime_id: str, session_id: str, message: str) -> str:
+def invoke_agent(client, runtime_arn: str, session_id: str, message: str) -> str:
     """Invoke the AgentCore Runtime and return the response text."""
-    payload = json.dumps({"inputText": message}).encode()
+    payload = json.dumps({"prompt": message}).encode()
 
     t0 = time.time()
     response = client.invoke_agent_runtime(
-        agentRuntimeId=runtime_id,
-        sessionId=session_id,
+        agentRuntimeArn=runtime_arn,
+        runtimeSessionId=session_id,
         payload=payload,
         contentType="application/json",
         accept="application/json",
@@ -68,7 +73,7 @@ def invoke_agent(client, runtime_id: str, session_id: str, message: str) -> str:
     latency = time.time() - t0
 
     # Response can be a stream or a direct body depending on configuration
-    body = response.get("body")
+    body = response.get("response") or response.get("body")
     if hasattr(body, "read"):
         raw = body.read()
     else:
@@ -76,18 +81,18 @@ def invoke_agent(client, runtime_id: str, session_id: str, message: str) -> str:
 
     try:
         result = json.loads(raw)
-        text = result.get("response") or result.get("output") or str(result)
-    except json.JSONDecodeError:
-        text = raw.decode("utf-8", errors="replace")
+        text = result.get("result") or result.get("response") or result.get("output") or str(result)
+    except (json.JSONDecodeError, TypeError):
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
 
     return text, latency
 
 
-def run_interactive(client, runtime_id: str, session_id: str):
+def run_interactive(client, runtime_arn: str, session_id: str):
     console.print()
     console.print(Panel(
         "[bold cyan]AgentCore RAG Agent — Interactive Chat[/bold cyan]\n\n"
-        f"Runtime ID:  {runtime_id}\n"
+        f"Runtime ARN: {runtime_arn}\n"
         f"Session ID:  {session_id}\n\n"
         "The agent will use its tools (search_knowledge_base, summarize_topic)\n"
         "autonomously. You don't need to trigger retrieval explicitly.\n\n"
@@ -110,7 +115,7 @@ def run_interactive(client, runtime_id: str, session_id: str):
             console.print("[dim]Goodbye![/dim]")
             break
         if user_input.lower() == "new":
-            session_id = f"session-{uuid.uuid4().hex[:8]}"
+            session_id = new_session_id()
             console.print(f"[dim]New session: {session_id}[/dim]")
             turn = 0
             continue
@@ -119,7 +124,7 @@ def run_interactive(client, runtime_id: str, session_id: str):
         console.print(f"[dim]  Invoking AgentCore Runtime (session={session_id}, turn={turn})...[/dim]")
 
         try:
-            response, latency = invoke_agent(client, runtime_id, session_id, user_input)
+            response, latency = invoke_agent(client, runtime_arn, session_id, user_input)
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             continue
@@ -132,14 +137,14 @@ def run_interactive(client, runtime_id: str, session_id: str):
         ))
 
 
-def run_demo(client, runtime_id: str, session_id: str):
+def run_demo(client, runtime_arn: str, session_id: str):
     console.print()
     console.print(Panel.fit(
         "[bold cyan]AgentCore Agent — Demo Mode[/bold cyan]\n"
         "[dim]Pre-scripted conversation demonstrating tool use and memory[/dim]",
         border_style="cyan",
     ))
-    console.print(f"\n  Runtime ID: {runtime_id}")
+    console.print(f"\n  Runtime ARN: {runtime_arn}")
     console.print(f"  Session ID: {session_id}")
     console.print(f"  Questions:  {len(DEMO_SCRIPT)}")
 
@@ -150,7 +155,7 @@ def run_demo(client, runtime_id: str, session_id: str):
 
         console.print("[dim]  Invoking...[/dim]")
         try:
-            response, latency = invoke_agent(client, runtime_id, session_id, question)
+            response, latency = invoke_agent(client, runtime_arn, session_id, question)
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             continue
@@ -191,15 +196,15 @@ def main():
     parser.add_argument("--session-id", type=str, default=None, help="Custom session ID")
     args = parser.parse_args()
 
-    runtime_id = load_config()
-    session_id = args.session_id or f"workshop-{uuid.uuid4().hex[:8]}"
+    runtime_arn = load_config()
+    session_id = args.session_id or new_session_id()
 
     client = boto3.client("bedrock-agentcore", region_name=AWS_REGION)
 
     if args.demo:
-        run_demo(client, runtime_id, session_id)
+        run_demo(client, runtime_arn, session_id)
     else:
-        run_interactive(client, runtime_id, session_id)
+        run_interactive(client, runtime_arn, session_id)
 
 
 if __name__ == "__main__":

@@ -26,27 +26,25 @@ Stage 4 — Production         (15 min)   Memory + Observability + Evaluation + 
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Python | 3.10+ | |
+| Python | 3.10+ | Managed by uv |
+| uv | latest | Package/venv manager — install instructions in Stage 0 |
 | AWS CLI | v2 | Required for login — install instructions in Stage 0 |
-| Docker | 24+ | Stage 3 only |
+| Docker | 24+ | Optional — only for `agentcore launch --local-build` (Stage 3 uses CodeBuild by default) |
 | AWS Region | `us-east-1` | Recommended for model availability |
 
 ### AWS Login
 
-This workshop uses **AWS IAM Identity Center (SSO)** for authentication — no static access keys needed.
+Log in to AWS with:
 
 ```bash
-# First time: set up SSO
-aws configure sso
-
-# Each session: log in
-aws sso login --profile <your-profile>
-
-# Or let Stage 0 handle it:
-python stage0-setup/00_check_prerequisites.py --login
+aws login
 ```
 
-If your organisation uses IAM user access keys instead, `aws configure` also works.
+Make sure your default region is `us-east-1`. Verify it worked:
+
+```bash
+aws sts get-caller-identity
+```
 
 ### Required AWS Permissions
 
@@ -59,38 +57,41 @@ Your IAM role/user needs:
 
 ### Bedrock Model Access
 
-Enable these models in the [Bedrock Console → Model access](https://us-east-1.console.aws.amazon.com/bedrock/home#/modelaccess):
-- `Amazon → Titan Text Embeddings V2`
-- `Anthropic → Claude 3 Haiku`
-- `Anthropic → Claude 3.5 Sonnet v2`
+As of late 2025, the **Model access** page is retired — serverless foundation models are **automatically enabled** in every account/region. Access is now governed by IAM (`bedrock:InvokeModel`), which `AmazonBedrockFullAccess` already grants.
+
+The workshop uses:
+- `Amazon → Titan Text Embeddings V2` — ready to use, no action needed
+- `Anthropic → Claude Haiku 4.5`
+- `Anthropic → Claude Sonnet 4.6`
+
+**Anthropic models require a one-time usage form before first use.** Submit it once by opening the [Bedrock Chat / Playground](https://us-east-1.console.aws.amazon.com/bedrock/home#/chat-playground), selecting a Claude model, and completing the short form it prompts — access is granted immediately.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Install AWS CLI v2 (see stage0-setup/README.md for OS-specific instructions)
+# 1. Install uv and AWS CLI v2 (see stage0-setup/README.md for OS-specific instructions)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 aws --version   # should show aws-cli/2.x.x
 
 # 2. Log in to AWS
-aws sso login --profile <your-profile>
-# or: aws configure  (for static access keys)
+aws login
 
-# 3. Clone and install deps
+# 3. Clone the repo
 git clone <this-repo>
 cd intro-to-RAG-Agentcore-Workshop
-pip install -r requirements.txt
-pip install -r stage1-basic-rag/requirements.txt
 
 # 4. Copy config file
 cp .env.example .env   # Windows: copy .env.example .env
 
-# 5. Run the prerequisite check (--login triggers aws sso login for you)
+# 5. Install Stage 0 deps and run the prerequisite check
 cd stage0-setup
-python 00_check_prerequisites.py
+uv sync
+uv run 00_check_prerequisites.py
 
-# 6. Work through each stage in order
-cd ../stage1-basic-rag && python 01_chunk_and_embed.py
+# 6. Work through each stage in order (each is its own uv project)
+cd ../stage1-basic-rag && uv sync && uv run 01_chunk_and_embed.py
 ```
 
 ---
@@ -153,10 +154,10 @@ Five documents in `stage0-setup/data/` are used throughout the workshop:
 
 ## Troubleshooting
 
-**`AccessDeniedException` on Bedrock:** Enable model access in the console under Bedrock → Model access.
+**`AccessDeniedException` on Bedrock:** For Anthropic (Claude) models, submit the one-time usage form via the Bedrock Chat / Playground. Otherwise, check that your IAM role has `bedrock:InvokeModel`. (The old Model access page is retired — there's nothing to "enable" there anymore.)
 
 **`ResourceNotFoundException` in Stage 2:** The KB sync may still be in progress — run `03_sync_and_query.py` with the `--wait` flag.
 
-**Docker build fails in Stage 3:** Ensure Docker Desktop is running and you have logged in via `aws ecr get-login-password`.
+**Stage 3 deploy fails:** `agentcore launch` builds with AWS CodeBuild (no local Docker needed) — check the CodeBuild log link it prints. To build locally instead, run `agentcore launch --local-build` (or `uv run 02_deploy_agent.py --local-build`), which does require Docker Desktop running.
 
-**`ModuleNotFoundError`:** Each stage has its own `requirements.txt` — run `pip install -r requirements.txt` inside that stage's folder.
+**`ModuleNotFoundError`:** Each stage has its own `pyproject.toml` — run `uv sync` inside that stage's folder, and run scripts with `uv run <script>.py`.

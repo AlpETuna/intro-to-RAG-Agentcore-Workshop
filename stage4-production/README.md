@@ -22,7 +22,7 @@ Stage 3 Agent
 
 ```bash
 cd stage4-production
-pip install -r requirements.txt
+uv sync
 ```
 
 ---
@@ -34,7 +34,7 @@ pip install -r requirements.txt
 Creates an AgentCore Memory resource, populates it with a simulated conversation, triggers a memory extraction job, and demonstrates recall in a new session.
 
 ```bash
-python 01_add_memory.py
+uv run 01_add_memory.py
 ```
 
 **Watch for:**
@@ -51,10 +51,10 @@ python 01_add_memory.py
 Instruments the RAG pipeline with OpenTelemetry spans and shows what X-Ray traces look like. Optionally creates a CloudWatch dashboard.
 
 ```bash
-python 02_observability.py
+uv run 02_observability.py
 
 # Create a CloudWatch dashboard (requires Stage 3 runtime to be deployed)
-python 02_observability.py --create-dashboard
+uv run 02_observability.py --create-dashboard
 ```
 
 **Watch for:**
@@ -72,10 +72,10 @@ Runs 5 ground-truth questions through the RAG pipeline and scores them on the RA
 
 ```bash
 # Evaluate Stage 1 FAISS pipeline
-python 03_evaluate_rag.py --pipeline faiss
+uv run 03_evaluate_rag.py --pipeline faiss
 
 # Evaluate Stage 2 Bedrock KB pipeline
-python 03_evaluate_rag.py --pipeline bedrock-kb
+uv run 03_evaluate_rag.py --pipeline bedrock-kb
 ```
 
 **Watch for:**
@@ -94,7 +94,7 @@ python 03_evaluate_rag.py --pipeline bedrock-kb
 Creates an AgentCore Gateway that exposes the Bedrock KB as an MCP-compatible tool. Any agent — regardless of framework — can now discover and call the KB through a standard interface.
 
 ```bash
-python 04_gateway_tool.py
+uv run 04_gateway_tool.py
 ```
 
 **Watch for:**
@@ -128,11 +128,11 @@ Use this before going live:
 ## Cleanup
 
 ```bash
-python cleanup.py
+uv run cleanup.py
 ```
 
 Then clean up stages 2 and 3:
 ```bash
-cd ../stage2-bedrock-kb && python cleanup.py
-cd ../stage3-agentcore-agent && python cleanup.py
+cd ../stage2-bedrock-kb && uv run cleanup.py
+cd ../stage3-agentcore-agent && uv run cleanup.py
 ```

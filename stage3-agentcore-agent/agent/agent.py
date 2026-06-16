@@ -16,6 +16,7 @@ Environment variables (injected by AgentCore Runtime):
   AWS_REGION          — set in the runtime configuration
 """
 
+import functools
 import logging
 import os
 
@@ -29,9 +30,17 @@ logger = logging.getLogger(__name__)
 
 KB_ID = os.environ.get("KNOWLEDGE_BASE_ID", "")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-AGENT_MODEL = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+AGENT_MODEL = "us.anthropic.claude-sonnet-4-6"
+SUMMARIZE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 bedrock_agent_rt = boto3.client("bedrock-agent-runtime", region_name=AWS_REGION)
+
+
+@functools.lru_cache(maxsize=1)
+def summarize_model_arn() -> str:
+    """Inference-profile ARN for retrieve_and_generate (needs an ARN, not an ID)."""
+    account = boto3.client("sts", region_name=AWS_REGION).get_caller_identity()["Account"]
+    return f"arn:aws:bedrock:{AWS_REGION}:{account}:inference-profile/{SUMMARIZE_MODEL}"
 
 
 @tool
@@ -109,10 +118,7 @@ def summarize_topic(topic: str) -> str:
                 "type": "KNOWLEDGE_BASE",
                 "knowledgeBaseConfiguration": {
                     "knowledgeBaseId": KB_ID,
-                    "modelArn": (
-                        f"arn:aws:bedrock:{AWS_REGION}::foundation-model/"
-                        "anthropic.claude-3-haiku-20240307-v1:0"
-                    ),
+                    "modelArn": summarize_model_arn(),
                     "retrievalConfiguration": {
                         "vectorSearchConfiguration": {
                             "numberOfResults": 5,

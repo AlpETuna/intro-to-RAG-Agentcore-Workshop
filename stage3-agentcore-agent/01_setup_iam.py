@@ -13,7 +13,7 @@ launch`, so we no longer create one here — we just provide the execution role
 so the runtime gets least-privilege, scoped permissions.
 
 Usage:
-    python 01_setup_iam.py
+    uv run 01_setup_iam.py
 """
 
 import json
@@ -75,7 +75,10 @@ def create_agentcore_execution_role(iam, account_id: str) -> str:
                     "bedrock:InvokeModelWithResponseStream",
                 ],
                 "Resource": [
-                    f"arn:aws:bedrock:{AWS_REGION}::foundation-model/*",
+                    # Cross-region inference profiles (the `us.` prefix) can route
+                    # the request to any region in the profile, so allow the
+                    # underlying foundation models in all regions + the profiles.
+                    "arn:aws:bedrock:*::foundation-model/*",
                     f"arn:aws:bedrock:{AWS_REGION}:*:inference-profile/*",
                 ],
             },
@@ -194,7 +197,7 @@ def main():
     console.print(Panel(
         "[green]Execution role ready![/green]\n\n"
         "Next step — configure and deploy the agent with the agentcore CLI:\n\n"
-        "  [bold]python 02_deploy_agent.py[/bold]\n\n"
+        "  [bold]uv run 02_deploy_agent.py[/bold]\n\n"
         "[dim]No Docker needed — the agentcore CLI builds the image with "
         "AWS CodeBuild and creates the ECR repository for you.[/dim]",
         title="Done",

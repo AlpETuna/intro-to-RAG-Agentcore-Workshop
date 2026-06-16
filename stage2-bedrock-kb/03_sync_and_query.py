@@ -11,12 +11,13 @@ completion, then runs queries using two Bedrock APIs:
 Also demonstrates metadata filtering and hybrid search.
 
 Usage:
-    python 03_sync_and_query.py
-    python 03_sync_and_query.py --skip-sync   (if already synced)
-    python 03_sync_and_query.py --query "What is HNSW?"
+    uv run 03_sync_and_query.py
+    uv run 03_sync_and_query.py --skip-sync   (if already synced)
+    uv run 03_sync_and_query.py --query "What is HNSW?"
 """
 
 import argparse
+import functools
 import json
 import os
 import time
@@ -32,8 +33,21 @@ from rich.table import Table
 
 ENV_FILE = Path(__file__).parent.parent / ".env"
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+GENERATION_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 console = Console()
+
+
+@functools.lru_cache(maxsize=1)
+def generation_model_arn() -> str:
+    """Inference-profile ARN for the generation model.
+
+    Current Claude models are only available on-demand via a cross-region
+    inference profile, so retrieve_and_generate needs the inference-profile
+    ARN (which includes the account ID) rather than a foundation-model ARN.
+    """
+    account = boto3.client("sts", region_name=AWS_REGION).get_caller_identity()["Account"]
+    return f"arn:aws:bedrock:{AWS_REGION}:{account}:inference-profile/{GENERATION_MODEL}"
 
 DEMO_QUERIES = [
     "What are the main chunking strategies for RAG?",
@@ -95,6 +109,10 @@ def wait_for_ingestion(bedrock_agent, kb_id: str, ds_id: str, job_id: str, timeo
                 console.print(f"  Documents scanned:  {stats.get('numberOfDocumentsScanned', 0)}")
                 console.print(f"  Documents indexed:  {stats.get('numberOfNewDocumentsIndexed', 0)}")
                 console.print(f"  Documents failed:   {stats.get('numberOfDocumentsFailed', 0)}")
+                # OpenSearch Serverless needs a few seconds after ingestion before
+                # the new vectors are searchable; querying too soon returns 0 results.
+                console.print("  [dim]Waiting 20s for the index to become searchable...[/dim]")
+                time.sleep(20)
                 return
             if status in ("FAILED", "STOPPED"):
                 console.print(f"  [red]Ingestion {status}[/red]")
@@ -126,10 +144,7 @@ def retrieve_and_generate(bedrock_rt, kb_id: str, query: str, session_id: str = 
             "type": "KNOWLEDGE_BASE",
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": kb_id,
-                "modelArn": (
-                    f"arn:aws:bedrock:{AWS_REGION}::foundation-model/"
-                    "anthropic.claude-3-haiku-20240307-v1:0"
-                ),
+                "modelArn": generation_model_arn(),
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
                         "numberOfResults": 5,
@@ -249,7 +264,7 @@ def main():
         "  No citations                 Citations with source URIs\n"
         "  Re-run script to update      Call StartIngestionJob API\n\n"
         "Next step:\n"
-        "  [bold]python 04_compare_approaches.py[/bold]",
+        "  [bold]uv run 04_compare_approaches.py[/bold]",
         title="What Changed",
         border_style="blue",
     ))

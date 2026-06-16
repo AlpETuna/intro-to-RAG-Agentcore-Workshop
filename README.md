@@ -26,10 +26,10 @@ Stage 4 — Production         (15 min)   Memory + Observability + Evaluation + 
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Python | 3.10+ | Managed by uv |
+| Python | 3.11+ | Managed by uv |
 | uv | latest | Package/venv manager — install instructions in Stage 0 |
 | AWS CLI | v2 | Required for login — install instructions in Stage 0 |
-| Docker | 24+ | Optional — only for `agentcore launch --local-build` (Stage 3 uses CodeBuild by default) |
+| Docker | 24+ | Optional — only for `agentcore deploy --local-build` (Stage 3 uses CodeBuild by default) |
 | AWS Region | `us-east-1` | Recommended for model availability |
 
 ### AWS Login
@@ -158,6 +158,6 @@ Five documents in `stage0-setup/data/` are used throughout the workshop:
 
 **`ResourceNotFoundException` in Stage 2:** The KB sync may still be in progress — run `03_sync_and_query.py` with the `--wait` flag.
 
-**Stage 3 deploy fails:** `agentcore launch` builds with AWS CodeBuild (no local Docker needed) — check the CodeBuild log link it prints. To build locally instead, run `agentcore launch --local-build` (or `uv run 02_deploy_agent.py --local-build`), which does require Docker Desktop running.
+**Stage 3 deploy fails:** `agentcore deploy` builds with AWS CodeBuild (no local Docker needed) — check the CodeBuild log link it prints. To build locally instead, run `agentcore deploy --local-build` (or `uv run 02_deploy_agent.py --local-build`), which does require Docker Desktop running.
 
 **`ModuleNotFoundError`:** Each stage has its own `pyproject.toml` — run `uv sync` inside that stage's folder, and run scripts with `uv run <script>.py`.

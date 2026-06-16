@@ -3,7 +3,9 @@
 Stage 2 — Cleanup
 
 Deletes all Stage 2 resources to stop OpenSearch Serverless charges:
-  - Bedrock Knowledge Base (and its OpenSearch Serverless collection)
+  - Bedrock Knowledge Base
+  - OpenSearch Serverless collection + its security/access policies
+    (this is what actually stops the OCU charges)
   - S3 bucket (empties it first)
   - IAM role and inline policies
 
@@ -11,8 +13,8 @@ Deletes all Stage 2 resources to stop OpenSearch Serverless charges:
     02_create_knowledge_base.py to recreate resources.
 
 Usage:
-    python cleanup.py
-    python cleanup.py --yes   (skip confirmation)
+    uv run cleanup.py
+    uv run cleanup.py --yes   (skip confirmation)
 """
 
 import argparse
@@ -38,6 +40,7 @@ def load_config():
         "ds_id": os.getenv("KB_DATA_SOURCE_ID"),
         "bucket": os.getenv("S3_BUCKET_NAME"),
         "role_arn": os.getenv("KB_IAM_ROLE_ARN"),
+        "collection_name": os.getenv("OPENSEARCH_COLLECTION_NAME"),
     }
 
 
@@ -53,6 +56,43 @@ def delete_kb(bedrock_agent, kb_id: str):
             console.print(f"  [dim]KB already gone: {kb_id}[/dim]")
         else:
             console.print(f"  [yellow]KB delete error:[/yellow] {e}")
+
+
+def delete_oss(aoss, collection_name: str):
+    """Delete the OpenSearch Serverless collection and its three policies."""
+    if not collection_name:
+        console.print("[dim]No OPENSEARCH_COLLECTION_NAME in .env — skipping[/dim]")
+        return
+    suffix = collection_name.replace("rag-kb-", "")
+
+    # Delete the collection first (needs its id, looked up by name).
+    try:
+        details = aoss.batch_get_collection(names=[collection_name])["collectionDetails"]
+        if details:
+            aoss.delete_collection(id=details[0]["id"])
+            console.print(f"  [green]✓ Deleted OpenSearch collection:[/green] {collection_name}")
+        else:
+            console.print(f"  [dim]Collection already gone: {collection_name}[/dim]")
+    except ClientError as e:
+        console.print(f"  [yellow]Collection delete error:[/yellow] {e}")
+
+    # Policies can be removed once the collection is gone.
+    for ptype, name, kind in [
+        ("encryption", f"rag-enc-{suffix}", "security"),
+        ("network", f"rag-net-{suffix}", "security"),
+        ("data", f"rag-acc-{suffix}", "access"),
+    ]:
+        try:
+            if kind == "access":
+                aoss.delete_access_policy(name=name, type=ptype)
+            else:
+                aoss.delete_security_policy(name=name, type=ptype)
+            console.print(f"  [green]✓ Deleted {ptype} policy:[/green] {name}")
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("ResourceNotFoundException",):
+                console.print(f"  [dim]{ptype} policy already gone: {name}[/dim]")
+            else:
+                console.print(f"  [yellow]{ptype} policy delete error:[/yellow] {e}")
 
 
 def empty_and_delete_bucket(s3, bucket: str):
@@ -96,7 +136,9 @@ def delete_iam_role(iam, role_arn: str):
 def clear_env():
     env_path = str(ENV_FILE)
     for key in ["KNOWLEDGE_BASE_ID", "KNOWLEDGE_BASE_ARN", "KB_DATA_SOURCE_ID",
-                 "S3_BUCKET_NAME", "KB_IAM_ROLE_ARN"]:
+                 "S3_BUCKET_NAME", "KB_IAM_ROLE_ARN",
+                 "OPENSEARCH_COLLECTION_ARN", "OPENSEARCH_COLLECTION_NAME",
+                 "OPENSEARCH_INDEX_NAME"]:
         set_key(env_path, key, "")
     console.print("  [green]✓ Cleared Stage 2 values from .env[/green]")
 
@@ -112,9 +154,10 @@ def main():
     console.print(Panel(
         "[bold red]Stage 2 Cleanup[/bold red]\n\n"
         "The following resources will be PERMANENTLY DELETED:\n\n"
-        f"  • Knowledge Base:  {config['kb_id'] or '(not set)'}\n"
-        f"  • S3 Bucket:       {config['bucket'] or '(not set)'}\n"
-        f"  • IAM Role:        {config['role_arn'] or '(not set)'}\n",
+        f"  • Knowledge Base:    {config['kb_id'] or '(not set)'}\n"
+        f"  • OpenSearch coll.:  {config['collection_name'] or '(not set)'}\n"
+        f"  • S3 Bucket:         {config['bucket'] or '(not set)'}\n"
+        f"  • IAM Role:          {config['role_arn'] or '(not set)'}\n",
         border_style="red",
     ))
 
@@ -127,9 +170,11 @@ def main():
     bedrock_agent = boto3.client("bedrock-agent", region_name=AWS_REGION)
     s3 = boto3.client("s3", region_name=AWS_REGION)
     iam = boto3.client("iam", region_name=AWS_REGION)
+    aoss = boto3.client("opensearchserverless", region_name=AWS_REGION)
 
     console.print("\n[bold]Deleting resources...[/bold]")
     delete_kb(bedrock_agent, config["kb_id"])
+    delete_oss(aoss, config["collection_name"])
     empty_and_delete_bucket(s3, config["bucket"])
     delete_iam_role(iam, config["role_arn"])
     clear_env()
@@ -137,7 +182,7 @@ def main():
     console.print()
     console.print(Panel(
         "[green]Stage 2 resources deleted.[/green]\n\n"
-        "OpenSearch Serverless charges stop once the KB is deleted.\n"
+        "OpenSearch Serverless charges stop once the collection is deleted.\n"
         "Check the AWS Cost Explorer in 24 hours to confirm.",
         title="Cleanup Complete",
         border_style="green",

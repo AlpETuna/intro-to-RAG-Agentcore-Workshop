@@ -18,7 +18,17 @@
       "Read(//private/tmp/**)",
       "Bash(timeout 120 uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)",
       "Bash(timeout 150 uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)",
-      "Bash(uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)"
+      "Bash(uvx --from bedrock-agentcore-starter-toolkit agentcore configure --help)",
+      "Bash(../.venv/bin/python 03_rag_pipeline.py --query \"What is RAG?\")",
+      "Bash(uvx --with opensearch-py==3.2.0 python -c \"from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection; print\\('imports OK'\\)\")",
+      "Bash(uv run *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"help exit=$?\")",
+      "Bash(grep -iA20 \"Commands\")",
+      "Bash(perl -pi -e 's/agentcore launch/agentcore deploy/g' README.md stage3-agentcore-agent/README.md stage0-setup/00_check_prerequisites.py)",
+      "Bash(uvx --with bedrock-agentcore --with boto3 python -c ' *)",
+      "Bash(uvx --with bedrock-agentcore --with botocore[crt] --with boto3 python -c ' *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

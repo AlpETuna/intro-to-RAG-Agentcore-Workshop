@@ -9,9 +9,9 @@ step: the query, retrieved context, the constructed prompt, and the answer.
 This is the "show your work" script — everything is made visible.
 
 Usage:
-    python 03_rag_pipeline.py
-    python 03_rag_pipeline.py --query "What is chunking in RAG?"
-    python 03_rag_pipeline.py --top-k 5 --show-prompt
+    uv run 03_rag_pipeline.py
+    uv run 03_rag_pipeline.py --query "What is chunking in RAG?"
+    uv run 03_rag_pipeline.py --top-k 5 --show-prompt
 """
 
 import argparse
@@ -30,7 +30,7 @@ from rich.syntax import Syntax
 
 INDEX_DIR = Path(__file__).parent / "faiss_index"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
-GENERATION_MODEL = "anthropic.claude-3-haiku-20240307-v1:0"
+GENERATION_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 EMBEDDING_DIM = 1024
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
@@ -211,7 +211,7 @@ def main():
         "  • Must re-index when documents change\n\n"
         "  → Stage 2 solves all of these with Bedrock Knowledge Bases.\n\n"
         "Next step:\n"
-        "  [bold]python 04_interactive_chat.py[/bold]",
+        "  [bold]uv run 04_interactive_chat.py[/bold]",
         title="Summary",
         border_style="blue",
     ).renderable.format(k=args.top_k))

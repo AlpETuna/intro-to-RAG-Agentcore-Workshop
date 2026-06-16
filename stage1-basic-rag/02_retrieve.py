@@ -12,9 +12,9 @@ What you'll see:
   - Which chunks are retrieved and why
 
 Usage:
-    python 02_retrieve.py
-    python 02_retrieve.py --query "What is hybrid search?"
-    python 02_retrieve.py --top-k 5
+    uv run 02_retrieve.py
+    uv run 02_retrieve.py --query "What is hybrid search?"
+    uv run 02_retrieve.py --top-k 5
 """
 
 import argparse
@@ -147,7 +147,7 @@ def main():
         "  overlap ensures the best matching passage is found even if a fact\n"
         "  sits near a chunk boundary.\n\n"
         "Next step:\n"
-        "  [bold]python 03_rag_pipeline.py[/bold]",
+        "  [bold]uv run 03_rag_pipeline.py[/bold]",
         title="What's Happening",
         border_style="blue",
     ))

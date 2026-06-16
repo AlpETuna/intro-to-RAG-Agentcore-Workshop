@@ -13,9 +13,9 @@ Shows what's different from Stages 1 and 2:
   - The agent reasons about when retrieval is necessary
 
 Usage:
-    python 03_chat_with_agent.py
-    python 03_chat_with_agent.py --demo          (runs pre-set demo questions)
-    python 03_chat_with_agent.py --session-id MY_SESSION
+    uv run 03_chat_with_agent.py
+    uv run 03_chat_with_agent.py --demo          (runs pre-set demo questions)
+    uv run 03_chat_with_agent.py --session-id MY_SESSION
 """
 
 import argparse

@@ -2,12 +2,17 @@
 name = "rag-workshop-stage2"
 version = "0.1.0"
 description = "Stage 2 — Bedrock Knowledge Base (managed RAG)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.38.0",
     "botocore[crt]>=1.38.0",
     "python-dotenv>=1.0.0",
     "rich>=13.7.0",
+    # Used to create the vector index inside the OpenSearch Serverless collection
+    "opensearch-py>=2.4.0",
+    # 04_compare_approaches.py loads the Stage 1 FAISS index for a side-by-side
+    "faiss-cpu>=1.8.0",
+    "numpy>=1.26.0",
 ]
 
 [tool.uv]

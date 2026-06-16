@@ -10,8 +10,8 @@ Deletes Stage 4 resources:
   - CloudWatch dashboard
 
 Usage:
-    python cleanup.py
-    python cleanup.py --yes
+    uv run cleanup.py
+    uv run cleanup.py --yes
 """
 
 import argparse
@@ -57,10 +57,10 @@ def delete_gateway(client, gateway_id: str):
         return
     try:
         # Delete targets first
-        targets = client.list_gateway_targets(gatewayId=gateway_id).get("targets", [])
+        targets = client.list_gateway_targets(gatewayIdentifier=gateway_id).get("items", [])
         for t in targets:
-            client.delete_gateway_target(gatewayId=gateway_id, targetId=t["targetId"])
-        client.delete_gateway(gatewayId=gateway_id)
+            client.delete_gateway_target(gatewayIdentifier=gateway_id, targetId=t["targetId"])
+        client.delete_gateway(gatewayIdentifier=gateway_id)
         console.print(f"  [green]✓ Deleted Gateway:[/green] {gateway_id}")
     except ClientError as e:
         console.print(f"  [dim]Gateway: {e.response['Error']['Code']}[/dim]")
@@ -77,8 +77,7 @@ def delete_lambda(lambda_client):
             console.print(f"  [yellow]Lambda error:[/yellow] {e}")
 
 
-def delete_lambda_role(iam):
-    role_name = "RAGWorkshopLambdaRole"
+def delete_iam_role(iam, role_name: str):
     try:
         for p in iam.list_role_policies(RoleName=role_name).get("PolicyNames", []):
             iam.delete_role_policy(RoleName=role_name, PolicyName=p)
@@ -86,7 +85,7 @@ def delete_lambda_role(iam):
         console.print(f"  [green]✓ Deleted IAM role:[/green] {role_name}")
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchEntity":
-            console.print(f"  [dim]Role already gone[/dim]")
+            console.print(f"  [dim]Role already gone: {role_name}[/dim]")
         else:
             console.print(f"  [yellow]IAM error:[/yellow] {e}")
 
@@ -119,7 +118,7 @@ def main():
         f"  Memory:    {config['memory_id'] or '(not set)'}\n"
         f"  Gateway:   {config['gateway_id'] or '(not set)'}\n"
         f"  Lambda:    {LAMBDA_NAME}\n"
-        f"  IAM Role:  RAGWorkshopLambdaRole\n"
+        f"  IAM Roles: RAGWorkshopLambdaRole, RAGWorkshopGatewayRole\n"
         f"  Dashboard: RAGWorkshopAgent\n",
         border_style="red",
     ))
@@ -138,15 +137,16 @@ def main():
     delete_memory(agentcore, config["memory_id"])
     delete_gateway(agentcore, config["gateway_id"])
     delete_lambda(lambda_client)
-    delete_lambda_role(iam)
+    delete_iam_role(iam, "RAGWorkshopLambdaRole")
+    delete_iam_role(iam, "RAGWorkshopGatewayRole")
     delete_dashboard(cw)
     clear_env()
 
     console.print()
     console.print("[green]Stage 4 cleanup complete.[/green]")
     console.print("\nRemember to also run cleanup in stages 2 and 3 if you haven't:")
-    console.print("  [bold]cd ../stage2-bedrock-kb && python cleanup.py[/bold]")
-    console.print("  [bold]cd ../stage3-agentcore-agent && python cleanup.py[/bold]")
+    console.print("  [bold]cd ../stage2-bedrock-kb && uv run cleanup.py[/bold]")
+    console.print("  [bold]cd ../stage3-agentcore-agent && uv run cleanup.py[/bold]")
 
 
 if __name__ == "__main__":

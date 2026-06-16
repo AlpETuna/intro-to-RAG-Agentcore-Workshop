@@ -143,7 +143,7 @@ Environment Check
 ┌──────────────────────────────────────┬────────┬───────────────────────────┐
 │ Check                                │ Status │ Detail                    │
 ├──────────────────────────────────────┼────────┼───────────────────────────┤
-│ Python >= 3.10                       │  PASS  │ Python 3.12.0             │
+│ Python >= 3.11                       │  PASS  │ Python 3.12.0             │
 │ boto3: AWS SDK                       │  PASS  │ installed                 │
 │ rich: Terminal output                │  PASS  │ installed                 │
 │ python-dotenv: config management     │  PASS  │ installed                 │

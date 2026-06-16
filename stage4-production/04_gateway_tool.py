@@ -17,8 +17,8 @@ Steps:
   4. Test the tool via the Gateway API
 
 Usage:
-    python 04_gateway_tool.py
-    python 04_gateway_tool.py --test-only  (skip creation, test existing gateway)
+    uv run 04_gateway_tool.py
+    uv run 04_gateway_tool.py --test-only  (skip creation, test existing gateway)
 """
 
 import argparse
@@ -174,7 +174,9 @@ def deploy_lambda(lambda_client, role_arn: str, kb_id: str) -> str:
             Description="AgentCore Gateway tool: KB retrieval wrapper",
             Timeout=30,
             MemorySize=256,
-            Environment={"Variables": {"KNOWLEDGE_BASE_ID": kb_id, "AWS_REGION": AWS_REGION}},
+            # AWS_REGION is a reserved Lambda env var set automatically by the
+            # runtime — passing it to create_function is rejected, so we omit it.
+            Environment={"Variables": {"KNOWLEDGE_BASE_ID": kb_id}},
         )
         arn = response["FunctionArn"]
         console.print(f"  [green]✓ Created:[/green] {arn}")
@@ -190,78 +192,158 @@ def deploy_lambda(lambda_client, role_arn: str, kb_id: str) -> str:
     return arn
 
 
-def create_gateway(agentcore_client, account_id: str, lambda_arn: str) -> dict:
+def create_gateway_role(iam, account_id: str, lambda_arn: str) -> str:
+    """Role the Gateway assumes to invoke the Lambda tool target."""
+    role_name = "RAGWorkshopGatewayRole"
+    trust_policy = {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "bedrock-agentcore.amazonaws.com"},
+            "Action": "sts:AssumeRole",
+            "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
+        }],
+    }
+    inline = {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Action": ["lambda:InvokeFunction"],
+            "Resource": lambda_arn,
+        }],
+    }
+    try:
+        role_arn = iam.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
+            Description="AgentCore Gateway role for RAG workshop",
+        )["Role"]["Arn"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "EntityAlreadyExists":
+            role_arn = iam.get_role(RoleName=role_name)["Role"]["Arn"]
+        else:
+            raise
+    iam.put_role_policy(RoleName=role_name, PolicyName="InvokeLambda", PolicyDocument=json.dumps(inline))
+    time.sleep(10)
+    return role_arn
+
+
+def wait_for_gateway(agentcore_client, gateway_id: str, timeout: int = 120):
+    start = time.time()
+    while time.time() - start < timeout:
+        gw = agentcore_client.get_gateway(gatewayIdentifier=gateway_id)
+        status = gw["status"]
+        if status == "READY":
+            return gw
+        if status in ("FAILED", "UPDATE_UNSUCCESSFUL"):
+            console.print(f"  [red]Gateway status: {status}[/red] {gw.get('statusReasons', [])}")
+            return gw
+        console.print(f"  [dim]Gateway status: {status}...[/dim]", end="\r")
+        time.sleep(5)
+    return agentcore_client.get_gateway(gatewayIdentifier=gateway_id)
+
+
+def create_gateway(agentcore_client, gateway_role_arn: str, lambda_arn: str) -> dict:
     console.print(f"\n[bold]Creating AgentCore Gateway:[/bold] {GATEWAY_NAME}")
-    console.print("[dim]  Gateway exposes your Lambda as an MCP-compatible tool.[/dim]")
+    console.print("[dim]  Gateway exposes your Lambda as an MCP-compatible tool (IAM-authorized).[/dim]")
 
     try:
-        response = agentcore_client.create_gateway(
+        gateway = agentcore_client.create_gateway(
             name=GATEWAY_NAME,
             description="RAG Workshop — Knowledge Base search tool",
-            roleArn=f"arn:aws:iam::{account_id}:role/AgentCoreRAGWorkshopRole",
+            roleArn=gateway_role_arn,
+            protocolType="MCP",
+            authorizerType="AWS_IAM",
         )
-        gateway = response["gateway"]
-        gateway_id = gateway["gatewayId"]
-        console.print(f"  [green]✓ Gateway ID:[/green] {gateway_id}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("ConflictException",) or "already exists" in str(e).lower():
+            for gw in agentcore_client.list_gateways().get("items", []):
+                if gw.get("name") == GATEWAY_NAME:
+                    console.print(f"  [yellow]Already exists:[/yellow] {gw['gatewayId']}")
+                    return agentcore_client.get_gateway(gatewayIdentifier=gw["gatewayId"])
+        raise
 
-        # Register the Lambda as a tool target
+    gateway_id = gateway["gatewayId"]
+    console.print(f"  [green]✓ Gateway ID:[/green] {gateway_id}")
+    gateway = wait_for_gateway(agentcore_client, gateway_id)
+    console.print(f"  [green]✓ Gateway status:[/green] {gateway['status']}")
+
+    # Register the Lambda as an MCP tool target. The tool schema lives under
+    # targetConfiguration.mcp.lambda.toolSchema.inlinePayload (a list of tools),
+    # and the gateway uses its own IAM role (GATEWAY_IAM_ROLE) to invoke it.
+    try:
         agentcore_client.create_gateway_target(
-            gatewayId=gateway_id,
+            gatewayIdentifier=gateway_id,
             name="knowledge-base-search",
             description="Search the workshop knowledge base via Bedrock KB",
             targetConfiguration={
-                "lambda": {
-                    "lambdaArn": lambda_arn,
-                    "toolSchema": {
-                        "name": "search_knowledge_base",
-                        "description": (
-                            "Search the workshop knowledge base for information about "
-                            "RAG, Bedrock, AgentCore, vector databases, and serverless AWS."
-                        ),
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {"type": "string", "description": "The search query"},
-                                "num_results": {
-                                    "type": "integer",
-                                    "description": "Number of results (1-10)",
-                                    "default": 5,
+                "mcp": {
+                    "lambda": {
+                        "lambdaArn": lambda_arn,
+                        "toolSchema": {
+                            "inlinePayload": [{
+                                "name": "search_knowledge_base",
+                                "description": (
+                                    "Search the workshop knowledge base for information about "
+                                    "RAG, Bedrock, AgentCore, vector databases, and serverless AWS."
+                                ),
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "The search query"},
+                                        "num_results": {
+                                            "type": "integer",
+                                            "description": "Number of results (1-10)",
+                                        },
+                                    },
+                                    "required": ["query"],
                                 },
-                            },
-                            "required": ["query"],
+                            }]
                         },
-                    },
+                    }
                 }
             },
+            credentialProviderConfigurations=[{"credentialProviderType": "GATEWAY_IAM_ROLE"}],
         )
         console.print(f"  [green]✓ Tool target registered:[/green] search_knowledge_base")
-        return gateway
     except ClientError as e:
-        if "already exists" in str(e).lower():
-            gateways = agentcore_client.list_gateways()["gateways"]
-            for gw in gateways:
-                if gw.get("name") == GATEWAY_NAME:
-                    console.print(f"  [yellow]Already exists:[/yellow] {gw['gatewayId']}")
-                    return gw
-        console.print(f"  [yellow]Gateway creation note:[/yellow] {e}")
-        return {}
+        if e.response["Error"]["Code"] in ("ConflictException",):
+            console.print("  [yellow]Tool target already exists[/yellow]")
+        else:
+            raise
+    return gateway
 
 
-def test_gateway_tool(agentcore_client, gateway_id: str):
-    console.print(f"\n[bold]Testing Gateway tool[/bold]")
+def verify_gateway(agentcore_client, lambda_client, gateway: dict):
+    """Verify the gateway + its tool.
+
+    Note: invoking the gateway itself happens over its MCP HTTPS endpoint
+    (gatewayUrl) using an MCP client with SigV4/IAM auth — that's a protocol
+    call, not a boto3 control-plane call. Here we (1) confirm the tool is
+    registered via the control plane, then (2) invoke the backing Lambda
+    directly to prove the wrapped KB tool actually returns results.
+    """
+    gateway_id = gateway.get("gatewayId")
+    console.print(f"\n[bold]Verifying Gateway tool[/bold]")
+
+    # 1. Confirm the MCP tool is registered
+    targets = agentcore_client.list_gateway_targets(gatewayIdentifier=gateway_id).get("items", [])
+    console.print(f"  [green]✓ {len(targets)} tool target(s) registered[/green]")
+    if gateway.get("gatewayUrl"):
+        console.print(f"  [dim]MCP endpoint:[/dim] {gateway['gatewayUrl']}")
+
+    # 2. Invoke the backing Lambda directly (what the gateway calls under the hood)
     query = "What is HNSW in vector databases?"
-    console.print(f"  Query: [cyan]{query}[/cyan]")
-
+    console.print(f"\n  Invoking the tool Lambda — query: [cyan]{query}[/cyan]")
     try:
-        response = agentcore_client.invoke_gateway(
-            gatewayId=gateway_id,
-            toolName="search_knowledge_base",
-            toolInput=json.dumps({"query": query, "num_results": 3}),
+        resp = lambda_client.invoke(
+            FunctionName=LAMBDA_NAME,
+            Payload=json.dumps({"query": query, "num_results": 3}).encode(),
         )
-        result = json.loads(response.get("toolResult", "{}"))
-        results = result.get("results", [])
-
-        console.print(f"\n  [green]✓ Gateway returned {len(results)} results[/green]")
+        payload = json.loads(resp["Payload"].read())
+        body = json.loads(payload.get("body", "{}"))
+        results = body.get("results", [])
+        console.print(f"  [green]✓ Tool returned {len(results)} results[/green]")
         for i, r in enumerate(results[:2]):
             console.print(Panel(
                 f"[dim]Source: {r.get('source')} | Score: {r.get('score', 0):.3f}[/dim]\n\n"
@@ -270,8 +352,7 @@ def test_gateway_tool(agentcore_client, gateway_id: str):
                 border_style="green" if i == 0 else "dim",
             ))
     except Exception as e:
-        console.print(f"  [yellow]Gateway test note:[/yellow] {e}")
-        console.print("  [dim](Gateway may take a moment to become fully active)[/dim]")
+        console.print(f"  [yellow]Tool invocation note:[/yellow] {e}")
 
 
 def main():
@@ -313,16 +394,20 @@ def main():
 
     gateway_id = os.getenv("AGENTCORE_GATEWAY_ID")
 
+    gateway = {}
     if not args.test_only:
         role_arn = create_lambda_role(iam, account_id)
         lambda_arn = deploy_lambda(lambda_client, role_arn, kb_id)
-        gateway = create_gateway(agentcore, account_id, lambda_arn)
+        gateway_role_arn = create_gateway_role(iam, account_id, lambda_arn)
+        gateway = create_gateway(agentcore, gateway_role_arn, lambda_arn)
         gateway_id = gateway.get("gatewayId", "")
         if gateway_id:
             set_key(str(ENV_FILE), "AGENTCORE_GATEWAY_ID", gateway_id)
 
     if gateway_id:
-        test_gateway_tool(agentcore, gateway_id)
+        if not gateway:
+            gateway = agentcore.get_gateway(gatewayIdentifier=gateway_id)
+        verify_gateway(agentcore, lambda_client, gateway)
 
     console.print()
     console.print(Panel(
@@ -333,9 +418,9 @@ def main():
         "  Stage 3: Agentic RAG — Strands Agent on AgentCore Runtime\n"
         "  Stage 4: Production — Memory + Observability + Evaluation + Gateway\n\n"
         "Cleanup commands:\n"
-        "  [bold]cd ../stage2-bedrock-kb && python cleanup.py[/bold]\n"
-        "  [bold]cd ../stage3-agentcore-agent && python cleanup.py[/bold]\n"
-        "  [bold]cd ../stage4-production && python cleanup.py[/bold]",
+        "  [bold]cd ../stage2-bedrock-kb && uv run cleanup.py[/bold]\n"
+        "  [bold]cd ../stage3-agentcore-agent && uv run cleanup.py[/bold]\n"
+        "  [bold]cd ../stage4-production && uv run cleanup.py[/bold]",
         title="Congratulations",
         border_style="green",
     ))

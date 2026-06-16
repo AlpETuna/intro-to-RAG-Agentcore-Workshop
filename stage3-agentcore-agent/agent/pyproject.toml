@@ -2,7 +2,7 @@
 name = "rag-workshop-agent"
 version = "0.1.0"
 description = "RAG agent that runs inside AgentCore Runtime"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "bedrock-agentcore>=0.1.0",
     "strands-agents>=0.1.0",

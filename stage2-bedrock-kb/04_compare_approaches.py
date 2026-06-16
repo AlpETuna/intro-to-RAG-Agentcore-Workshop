@@ -8,9 +8,10 @@ Stage 2 Bedrock Knowledge Base, then renders a side-by-side comparison.
 Shows concretely where managed RAG improves over DIY RAG.
 
 Usage:
-    python 04_compare_approaches.py
+    uv run 04_compare_approaches.py
 """
 
+import functools
 import json
 import os
 import time
@@ -29,11 +30,18 @@ from rich.table import Table
 ENV_FILE = Path(__file__).parent.parent / ".env"
 FAISS_INDEX_DIR = Path(__file__).parent.parent / "stage1-basic-rag" / "faiss_index"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
-GENERATION_MODEL = "anthropic.claude-3-haiku-20240307-v1:0"
+GENERATION_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 EMBEDDING_DIM = 1024
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 console = Console()
+
+
+@functools.lru_cache(maxsize=1)
+def generation_model_arn() -> str:
+    """Inference-profile ARN for retrieve_and_generate (needs an ARN, not an ID)."""
+    account = boto3.client("sts", region_name=AWS_REGION).get_caller_identity()["Account"]
+    return f"arn:aws:bedrock:{AWS_REGION}:{account}:inference-profile/{GENERATION_MODEL}"
 
 COMPARISON_QUESTIONS = [
     "What is the difference between dense and sparse retrieval?",
@@ -97,9 +105,7 @@ def bedrock_kb_rag(bedrock_rt_agent, kb_id: str, question: str) -> tuple[str, fl
             "type": "KNOWLEDGE_BASE",
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": kb_id,
-                "modelArn": (
-                    f"arn:aws:bedrock:{AWS_REGION}::foundation-model/{GENERATION_MODEL}"
-                ),
+                "modelArn": generation_model_arn(),
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
                         "numberOfResults": 3,
@@ -199,7 +205,7 @@ def main():
         "    not raw accuracy for well-formed queries\n\n"
         "Next: Stage 3 wraps this KB in an AgentCore agent with memory.\n\n"
         "  [bold]cd ../stage3-agentcore-agent[/bold]\n"
-        "  [bold]python 01_setup_iam.py[/bold]",
+        "  [bold]uv run 01_setup_iam.py[/bold]",
         title="Takeaways",
         border_style="blue",
     ))

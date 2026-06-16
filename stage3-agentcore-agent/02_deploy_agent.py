@@ -6,15 +6,16 @@ Instead of hand-building a Docker image and calling the AgentCore control-plane
 API directly, this uses the `agentcore` CLI (bedrock-agentcore-starter-toolkit):
 
   1. `agentcore configure` — generates agent/.bedrock_agentcore.yaml
-  2. `agentcore launch`    — builds the image (AWS CodeBuild), pushes to ECR,
+  2. `agentcore deploy`    — builds the image (AWS CodeBuild), pushes to ECR,
                              and creates/updates the AgentCore Runtime
+                             (this command was formerly called `launch`)
   3. Reads the runtime ARN/ID back out of .bedrock_agentcore.yaml into .env
 
-No local Docker required — `agentcore launch` builds with CodeBuild by default.
+No local Docker required — `agentcore deploy` builds with CodeBuild by default.
 
 Usage:
-    python 02_deploy_agent.py
-    python 02_deploy_agent.py --local-build   (build locally with Docker instead of CodeBuild)
+    uv run 02_deploy_agent.py
+    uv run 02_deploy_agent.py --local-build   (build locally with Docker instead of CodeBuild)
 """
 
 import argparse
@@ -49,7 +50,7 @@ def load_config():
 
 def ensure_agentcore_cli():
     try:
-        subprocess.run(["agentcore", "--version"], capture_output=True, check=True)
+        subprocess.run(["agentcore", "--help"], capture_output=True, check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
         console.print(
             "[red]`agentcore` CLI not found.[/red] Install Stage 3 deps:\n"
@@ -83,10 +84,10 @@ def configure(role_arn: str):
 
 
 def launch(local_build: bool):
-    cmd = ["agentcore", "launch"]
+    cmd = ["agentcore", "deploy"]
     if local_build:
         cmd.append("--local-build")
-    run_cli(cmd, "Step 2/2 — agentcore launch (build → push → deploy → READY)")
+    run_cli(cmd, "Step 2/2 — agentcore deploy (build → push → deploy → READY)")
 
 
 def read_runtime_from_config() -> tuple[str, str]:
@@ -143,7 +144,7 @@ def main():
                       "will return an error until Stage 2 is complete.[/yellow]")
 
     # The agent reads KNOWLEDGE_BASE_ID and AWS_REGION from its environment.
-    # `agentcore launch` passes through env vars set in the current shell.
+    # `agentcore deploy` passes through env vars set in the current shell.
     os.environ["KNOWLEDGE_BASE_ID"] = kb_id
     os.environ.setdefault("AWS_REGION", AWS_REGION)
 
@@ -165,7 +166,7 @@ def main():
         "Quick test:\n"
         "  [bold]cd agent && agentcore invoke '{\"prompt\": \"What is RAG?\"}'[/bold]\n\n"
         "Next step:\n"
-        "  [bold]python 03_chat_with_agent.py[/bold]",
+        "  [bold]uv run 03_chat_with_agent.py[/bold]",
         title="Done",
         border_style="green",
     ))

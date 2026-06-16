@@ -12,7 +12,7 @@ What you'll see:
   - Final FAISS index saved and verified
 
 Usage:
-    python 01_chunk_and_embed.py
+    uv run 01_chunk_and_embed.py
 
 Output files:
     faiss_index/index.faiss      — the vector index
@@ -213,7 +213,7 @@ def main():
         f"  Vector dimensions: {EMBEDDING_DIM}\n"
         f"  Index type:        IndexFlatIP (exact cosine)\n\n"
         "Next step:\n"
-        "  [bold]python 02_retrieve.py[/bold]",
+        "  [bold]uv run 02_retrieve.py[/bold]",
         title="Done",
         border_style="green",
     ))

@@ -9,8 +9,8 @@ Tears down everything Stage 3 created:
   3. Clears the Stage 3 values from .env
 
 Usage:
-    python cleanup.py
-    python cleanup.py --yes
+    uv run cleanup.py
+    uv run cleanup.py --yes
 """
 
 import argparse

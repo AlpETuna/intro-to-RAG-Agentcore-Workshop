@@ -27,9 +27,9 @@ uv sync
 
 ## Scripts (run in order)
 
-### 01 — Create Infrastructure (`~2 min`)
+### 01 — Create Infrastructure (`~3–4 min`)
 
-Creates the S3 bucket, uploads the 5 workshop documents, and creates the IAM service role that Bedrock will use to access S3 and OpenSearch.
+Creates the S3 bucket, uploads the 5 workshop documents, creates the IAM service role, and provisions the **OpenSearch Serverless collection + vector index** that the KB writes embeddings into.
 
 ```bash
 uv run 01_create_infrastructure.py
@@ -39,19 +39,23 @@ uv run 01_create_infrastructure.py
 - The IAM trust policy structure (why Bedrock can assume the role)
 - The inline policy granting S3 read and OpenSearch write access
 - Resource names with a random suffix (ensures uniqueness across accounts)
+- The three OpenSearch Serverless policies (encryption / network / data access) that must exist before a collection can be created
+- The kNN vector index (`embedding` field, 1024-dim, HNSW + faiss)
+
+> **Why here?** The Bedrock `CreateKnowledgeBase` API does **not** auto-create the vector store — the collection and index must already exist and be passed in by ARN. This script creates them and saves `OPENSEARCH_COLLECTION_ARN` to `.env`.
 
 ---
 
-### 02 — Create Knowledge Base (`~5–8 min`)
+### 02 — Create Knowledge Base (`~2–3 min`)
 
-Creates the Bedrock Knowledge Base with an OpenSearch Serverless vector store. **This takes 5–8 minutes** while the OpenSearch collection provisions.
+Creates the Bedrock Knowledge Base pointed at the OpenSearch Serverless collection from step 01.
 
 ```bash
 uv run 02_create_knowledge_base.py
 ```
 
 **Watch for:**
-- The `storageConfiguration` showing the HNSW index config
+- The `storageConfiguration` referencing the real `collectionArn` + `vectorIndexName`
 - The `embeddingModelArn` — same Titan model as Stage 1
 - KB status progression: CREATING → ACTIVE
 - What Bedrock handles vs what you set up in Stage 1

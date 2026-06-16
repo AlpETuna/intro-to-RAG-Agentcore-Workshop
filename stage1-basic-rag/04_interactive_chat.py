@@ -11,8 +11,8 @@ Type 'stats' to see retrieval statistics for the last query.
 Type 'clear' to reset conversation history.
 
 Usage:
-    python 04_interactive_chat.py
-    python 04_interactive_chat.py --top-k 5
+    uv run 04_interactive_chat.py
+    uv run 04_interactive_chat.py --top-k 5
 """
 
 import argparse
@@ -30,7 +30,7 @@ from rich.rule import Rule
 
 INDEX_DIR = Path(__file__).parent / "faiss_index"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
-GENERATION_MODEL = "anthropic.claude-3-haiku-20240307-v1:0"
+GENERATION_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 EMBEDDING_DIM = 1024
 MAX_HISTORY_TURNS = 6
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")

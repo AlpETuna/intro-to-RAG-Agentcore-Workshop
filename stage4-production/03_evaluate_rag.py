@@ -13,13 +13,14 @@ Can evaluate both the Stage 1 (FAISS) and Stage 2 (Bedrock KB) pipelines.
 Outputs an evaluation report with scores and failure examples.
 
 Usage:
-    python 03_evaluate_rag.py
-    python 03_evaluate_rag.py --pipeline faiss
-    python 03_evaluate_rag.py --pipeline bedrock-kb
-    python 03_evaluate_rag.py --pipeline both
+    uv run 03_evaluate_rag.py
+    uv run 03_evaluate_rag.py --pipeline faiss
+    uv run 03_evaluate_rag.py --pipeline bedrock-kb
+    uv run 03_evaluate_rag.py --pipeline both
 """
 
 import argparse
+import functools
 import json
 import os
 import time
@@ -34,10 +35,17 @@ from rich.table import Table
 
 ENV_FILE = Path(__file__).parent.parent / ".env"
 FAISS_INDEX_DIR = Path(__file__).parent.parent / "stage1-basic-rag" / "faiss_index"
-JUDGE_MODEL = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-GENERATION_MODEL = "anthropic.claude-3-haiku-20240307-v1:0"
+JUDGE_MODEL = "us.anthropic.claude-sonnet-4-6"
+GENERATION_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+
+@functools.lru_cache(maxsize=1)
+def generation_model_arn() -> str:
+    """Inference-profile ARN for retrieve_and_generate (needs an ARN, not an ID)."""
+    account = boto3.client("sts", region_name=AWS_REGION).get_caller_identity()["Account"]
+    return f"arn:aws:bedrock:{AWS_REGION}:{account}:inference-profile/{GENERATION_MODEL}"
 
 console = Console()
 
@@ -175,7 +183,7 @@ def run_bedrock_kb_rag(bedrock_agent_rt, kb_id: str, question: str) -> tuple[str
             "type": "KNOWLEDGE_BASE",
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": kb_id,
-                "modelArn": f"arn:aws:bedrock:{AWS_REGION}::foundation-model/{GENERATION_MODEL}",
+                "modelArn": generation_model_arn(),
                 "retrievalConfiguration": {"vectorSearchConfiguration": {"numberOfResults": 3}},
             },
         },
@@ -339,7 +347,7 @@ def main():
     console.print()
     console.print(Panel(
         "Next step:\n"
-        "  [bold]python 04_gateway_tool.py[/bold]",
+        "  [bold]uv run 04_gateway_tool.py[/bold]",
         title="Done",
         border_style="green",
     ))

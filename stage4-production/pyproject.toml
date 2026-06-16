@@ -2,12 +2,17 @@
 name = "rag-workshop-stage4"
 version = "0.1.0"
 description = "Stage 4 — Production hardening (memory, observability, evaluation, gateway)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.38.0",
     "botocore[crt]>=1.38.0",
     "python-dotenv>=1.0.0",
     "rich>=13.7.0",
+    # MemoryClient (high-level AgentCore Memory helper) used by 01_add_memory.py
+    "bedrock-agentcore>=0.1.0",
+    # 02_observability.py and 03_evaluate_rag.py instrument/evaluate the Stage 1 FAISS pipeline
+    "faiss-cpu>=1.8.0",
+    "numpy>=1.26.0",
     "opentelemetry-api>=1.27.0",
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",

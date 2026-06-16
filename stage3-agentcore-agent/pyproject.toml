@@ -2,7 +2,7 @@
 name = "rag-workshop-stage3"
 version = "0.1.0"
 description = "Stage 3 — Deploy a Strands agent to AgentCore Runtime via the agentcore CLI"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.38.0",
     "botocore[crt]>=1.38.0",

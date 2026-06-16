@@ -14,8 +14,8 @@ You don't need the deployed agent for this script — it instruments the
 Stage 1 FAISS pipeline locally to show the concepts.
 
 Usage:
-    python 02_observability.py
-    python 02_observability.py --create-dashboard
+    uv run 02_observability.py
+    uv run 02_observability.py --create-dashboard
 """
 
 import argparse
@@ -131,7 +131,7 @@ def demo_manual_instrumentation(tracer):
             prompt = f"Context:\n{context}\n\nQuestion: {question}"
             t0 = time.time()
             gen_response = bedrock.invoke_model(
-                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
                 body=json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": 200,
@@ -144,7 +144,7 @@ def demo_manual_instrumentation(tracer):
             answer = result["content"][0]["text"]
             usage = result.get("usage", {})
             gen_latency = time.time() - t0
-            gen_span.set_attribute("model.id", "anthropic.claude-3-haiku-20240307-v1:0")
+            gen_span.set_attribute("model.id", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
             gen_span.set_attribute("tokens.input", usage.get("input_tokens", 0))
             gen_span.set_attribute("tokens.output", usage.get("output_tokens", 0))
             gen_span.set_attribute("latency.ms", int(gen_latency * 1000))
@@ -171,7 +171,7 @@ def _show_conceptual_trace():
         "  │    retrieval.method: faiss.IndexFlatIP\n"
         "  │\n"
         "  └─ rag.generate  [████████████████████████]  267ms\n"
-        "       model.id: anthropic.claude-3-haiku\n"
+        "       model.id: us.anthropic.claude-haiku-4-5\n"
         "       tokens.input: 1247\n"
         "       tokens.output: 89\n\n"
         "In X-Ray, each span is a timeline bar. You can click into any span\n"
@@ -319,7 +319,7 @@ def main():
         "  Error rate              | < 0.1%              | > 1%\n"
         "  Token cost per turn     | Baseline + 20%      | > baseline + 50%\n\n"
         "Next step:\n"
-        "  [bold]python 03_evaluate_rag.py[/bold]",
+        "  [bold]uv run 03_evaluate_rag.py[/bold]",
         title="Production Metrics",
         border_style="blue",
     ))

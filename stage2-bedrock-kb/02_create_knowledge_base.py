@@ -15,7 +15,7 @@ What Bedrock does for you (vs Stage 1 where you did this manually):
   • Updates: just sync the data source — no manual re-indexing
 
 Usage:
-    python 02_create_knowledge_base.py
+    uv run 02_create_knowledge_base.py
 """
 
 import json
@@ -40,15 +40,18 @@ def load_config():
     load_dotenv(ENV_FILE)
     bucket = os.getenv("S3_BUCKET_NAME")
     role_arn = os.getenv("KB_IAM_ROLE_ARN")
-    if not bucket or not role_arn:
-        console.print("[red]Missing S3_BUCKET_NAME or KB_IAM_ROLE_ARN. Run 01_create_infrastructure.py first.[/red]")
+    collection_arn = os.getenv("OPENSEARCH_COLLECTION_ARN")
+    index_name = os.getenv("OPENSEARCH_INDEX_NAME", "rag-workshop-index")
+    if not bucket or not role_arn or not collection_arn:
+        console.print("[red]Missing S3_BUCKET_NAME, KB_IAM_ROLE_ARN, or OPENSEARCH_COLLECTION_ARN. "
+                      "Run 01_create_infrastructure.py first.[/red]")
         raise SystemExit(1)
-    return bucket, role_arn
+    return bucket, role_arn, collection_arn, index_name
 
 
-def create_knowledge_base(bedrock_agent, role_arn: str) -> dict:
+def create_knowledge_base(bedrock_agent, role_arn: str, collection_arn: str, index_name: str) -> dict:
     console.print("\n[bold]Creating Bedrock Knowledge Base...[/bold]")
-    console.print("  [dim]This creates the KB definition — vector store comes next.[/dim]")
+    console.print(f"  [dim]Backed by collection {collection_arn.split('/')[-1]}, index {index_name}.[/dim]")
 
     response = bedrock_agent.create_knowledge_base(
         name="rag-workshop-kb",
@@ -71,8 +74,8 @@ def create_knowledge_base(bedrock_agent, role_arn: str) -> dict:
         storageConfiguration={
             "type": "OPENSEARCH_SERVERLESS",
             "opensearchServerlessConfiguration": {
-                "collectionArn": "",  # Bedrock creates and manages the collection
-                "vectorIndexName": "rag-workshop-index",
+                "collectionArn": collection_arn,
+                "vectorIndexName": index_name,
                 "fieldMapping": {
                     "vectorField": "embedding",
                     "textField": "text",
@@ -160,11 +163,11 @@ def main():
     console.print()
     console.print(Panel(
         "[yellow]Cost notice:[/yellow] OpenSearch Serverless costs ~$0.48/hr (2 OCU minimum).\n"
-        "Run [bold]python cleanup.py[/bold] when done to delete all Stage 2 resources.",
+        "Run [bold]uv run cleanup.py[/bold] when done to delete all Stage 2 resources.",
         border_style="yellow",
     ))
 
-    bucket, role_arn = load_config()
+    bucket, role_arn, collection_arn, index_name = load_config()
     bedrock_agent = boto3.client("bedrock-agent", region_name=AWS_REGION)
 
     # Explain what Bedrock is doing vs Stage 1
@@ -181,7 +184,7 @@ def main():
         border_style="blue",
     ))
 
-    kb = create_knowledge_base(bedrock_agent, role_arn)
+    kb = create_knowledge_base(bedrock_agent, role_arn, collection_arn, index_name)
     kb_id = kb["knowledgeBaseId"]
     kb_arn = kb["knowledgeBaseArn"]
 
@@ -200,7 +203,7 @@ def main():
         f"  Chunking:           FIXED_SIZE, 300 tokens, 20% overlap\n\n"
         "The KB exists but no documents are indexed yet.\n"
         "Next step syncs the S3 data source:\n"
-        "  [bold]python 03_sync_and_query.py[/bold]",
+        "  [bold]uv run 03_sync_and_query.py[/bold]",
         title="Done",
         border_style="green",
     ))

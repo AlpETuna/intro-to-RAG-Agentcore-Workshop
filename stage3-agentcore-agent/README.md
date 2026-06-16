@@ -33,10 +33,10 @@ cd stage3-agentcore-agent
 uv sync
 ```
 
-This installs the `agentcore` CLI (`bedrock-agentcore-starter-toolkit`). Verify it:
+This installs the `agentcore` CLI (`bedrock-agentcore-starter-toolkit`). Verify it (the CLI has no `--version` flag, so use `--help`):
 
 ```bash
-uv run agentcore --version
+uv run agentcore --help
 ```
 
 ---
@@ -45,7 +45,7 @@ uv run agentcore --version
 
 ### 01 — Setup IAM (`~2 min`)
 
-Creates the IAM execution role AgentCore Runtime assumes. (The ECR repository is created for you later by `agentcore launch` — no need to make one here.)
+Creates the IAM execution role AgentCore Runtime assumes. (The ECR repository is created for you later by `agentcore deploy` — no need to make one here.)
 
 ```bash
 uv run 01_setup_iam.py
@@ -60,7 +60,7 @@ uv run 01_setup_iam.py
 
 ### 02 — Configure and Deploy (`~5 min`)
 
-Drives the `agentcore` CLI: `agentcore configure` generates `agent/.bedrock_agentcore.yaml`, then `agentcore launch` builds the image with CodeBuild, pushes to ECR, and creates the runtime. The script then reads the runtime ARN/ID back into `.env`.
+Drives the `agentcore` CLI: `agentcore configure` generates `agent/.bedrock_agentcore.yaml`, then `agentcore deploy` builds the image with CodeBuild, pushes to ECR, and creates the runtime. The script then reads the runtime ARN/ID back into `.env`.
 
 ```bash
 uv run 02_deploy_agent.py
@@ -74,13 +74,13 @@ Equivalent manual commands (run inside `agent/`):
 ```bash
 agentcore configure --entrypoint agent.py --name rag_workshop_agent \
     --region us-east-1 --execution-role <AGENTCORE_EXECUTION_ROLE_ARN> --disable-memory
-agentcore launch
+agentcore deploy
 agentcore invoke '{"prompt": "What is RAG?"}'
 ```
 
 **Watch for:**
 - `agentcore configure` writes `agent/.bedrock_agentcore.yaml` — the deployment config
-- `agentcore launch` runs an AWS CodeBuild job (no local Docker) — it prints a log link
+- `agentcore deploy` runs an AWS CodeBuild job (no local Docker) — it prints a log link
 - Runtime provisioning: typically 2-4 minutes for cold start
 - The runtime gets a public HTTPS endpoint managed by AgentCore
 

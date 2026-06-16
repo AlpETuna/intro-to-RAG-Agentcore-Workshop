@@ -8,7 +8,7 @@ AWS login status, Bedrock model access, and optional tools (Docker, agentcore-cl
 If you are not logged in, it tells you to run `aws login`.
 
 Usage:
-    python 00_check_prerequisites.py
+    uv run 00_check_prerequisites.py
 """
 
 import sys
@@ -53,9 +53,9 @@ def check(label: str, ok: bool, detail: str = "") -> tuple[str, str, str]:
 
 def check_python() -> list:
     version = sys.version_info
-    ok = version >= (3, 10)
+    ok = version >= (3, 11)
     detail = f"Python {version.major}.{version.minor}.{version.micro}"
-    return [check("Python >= 3.10", ok, detail)]
+    return [check("Python >= 3.11", ok, detail)]
 
 
 def check_packages(packages: list) -> list:
@@ -173,22 +173,23 @@ def check_docker() -> list:
             ["docker", "--version"], capture_output=True, text=True, timeout=5
         )
         ok = result.returncode == 0
-        detail = result.stdout.strip() if ok else "Optional — agentcore launch uses CodeBuild"
+        detail = result.stdout.strip() if ok else "Optional — agentcore deploy uses CodeBuild"
         return [check("Docker (optional)", ok, detail)]
     except FileNotFoundError:
         return [check("Docker (optional)", False,
-                      "Optional — only needed for `agentcore launch --local-build`")]
+                      "Optional — only needed for `agentcore deploy --local-build`")]
     except Exception as e:
         return [check("Docker (optional)", False, str(e))]
 
 
 def check_agentcore_cli() -> list:
     try:
+        # The agentcore CLI has no --version flag; --help exits 0 when installed.
         result = subprocess.run(
-            ["agentcore", "--version"], capture_output=True, text=True, timeout=5
+            ["agentcore", "--help"], capture_output=True, text=True, timeout=5
         )
         ok = result.returncode == 0
-        detail = result.stdout.strip() if ok else "uv pip install bedrock-agentcore-starter-toolkit"
+        detail = "installed" if ok else "uv pip install bedrock-agentcore-starter-toolkit"
         return [check("agentcore-cli (Stage 3)", ok, detail)]
     except FileNotFoundError:
         return [check("agentcore-cli (Stage 3)", False,

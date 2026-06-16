@@ -16,28 +16,30 @@ This script:
   4. Shows the extracted memory entries
 
 Usage:
-    python 01_add_memory.py
+    uv run 01_add_memory.py
 """
 
-import json
 import os
 import time
 import uuid
 from pathlib import Path
 
-import boto3
-from botocore.exceptions import ClientError
+from bedrock_agentcore.memory import MemoryClient
 from dotenv import load_dotenv, set_key
 from rich.console import Console
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.table import Table
 
 ENV_FILE = Path(__file__).parent.parent / ".env"
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
+MEMORY_NAME = "rag_workshop_memory"        # must match [a-zA-Z][a-zA-Z0-9_]*
+ACTOR_ID = "workshop-user"                 # the "who" memories are scoped to
+STRATEGY_NAMESPACE = f"/users/{ACTOR_ID}"  # where the semantic strategy stores facts
+
 console = Console()
 
+# (role, text) — sent to create_event as (text, role) tuples with UPPERCASE roles.
 SESSION_A_CONVERSATION = [
     ("user", "I'm a Python developer and I prefer concise answers with code examples."),
     ("assistant", "Got it — Python examples, concise format. What would you like to know?"),
@@ -56,129 +58,123 @@ def load_config():
     return runtime_id
 
 
-def create_memory(client) -> str:
+def create_memory(client: MemoryClient) -> str:
+    """Create (or reuse) a Memory with a semantic long-term strategy.
+
+    create_memory_and_wait blocks until the resource is ACTIVE (a few minutes).
+    """
     console.print("\n[bold]Creating AgentCore Memory resource...[/bold]")
+    console.print("[dim]  Waiting for it to become ACTIVE (this can take a few minutes)...[/dim]")
+
+    strategies = [{
+        "semanticMemoryStrategy": {
+            "name": "userPreferences",
+            "description": "User preferences, technical background, and project context",
+            "namespaces": [STRATEGY_NAMESPACE],
+        }
+    }]
 
     try:
-        response = client.create_memory(
-            name="rag-workshop-memory",
+        memory = client.create_memory_and_wait(
+            name=MEMORY_NAME,
+            strategies=strategies,
             description="Long-term memory for the RAG workshop agent",
-            memoryConfiguration={
-                "strategies": [
-                    {
-                        "type": "SEMANTIC",
-                        "semanticMemoryStrategy": {
-                            "name": "user-preferences",
-                            "description": "Stores user preferences, technical background, and project context",
-                        },
-                    }
-                ]
-            },
+            event_expiry_days=30,
+            max_wait=300,
+            poll_interval=10,
         )
-        memory_id = response["memory"]["memoryId"]
+        memory_id = memory.get("id") or memory.get("memoryId")
         console.print(f"  [green]✓ Memory ID:[/green] {memory_id}")
         return memory_id
-    except ClientError as e:
-        if "already exists" in str(e).lower():
-            existing = client.list_memories()["memories"]
-            for m in existing:
-                if m.get("name") == "rag-workshop-memory":
-                    mid = m["memoryId"]
+    except Exception as e:
+        # If a memory with this name already exists, reuse it.
+        if "already" in str(e).lower() or "conflict" in str(e).lower() or "exist" in str(e).lower():
+            for m in client.list_memories():
+                if m.get("name") == MEMORY_NAME or m.get("id", "").startswith(MEMORY_NAME):
+                    mid = m.get("id") or m.get("memoryId")
                     console.print(f"  [yellow]Already exists:[/yellow] {mid}")
                     return mid
         raise
 
 
-def save_memory_to_session(client, memory_id: str, session_id: str, messages: list):
+def save_conversation(client: MemoryClient, memory_id: str, session_id: str, conversation: list):
+    """Store a multi-turn conversation as a single event in the session."""
     console.print(f"\n[bold]Saving conversation to memory[/bold] (session={session_id})")
 
-    client.create_memory_session(
-        memoryId=memory_id,
-        sessionId=session_id,
-        memorySessionConfiguration={
-            "maxCompletionMessages": 20,
-        },
+    messages = [(text, role.upper()) for role, text in conversation]
+    client.create_event(
+        memory_id=memory_id,
+        actor_id=ACTOR_ID,
+        session_id=session_id,
+        messages=messages,
     )
-
-    for msg in messages:
-        client.put_memory_session_message(
-            memoryId=memory_id,
-            sessionId=session_id,
-            messageContent={"role": msg[0], "content": msg[1]},
-        )
-        console.print(f"  [dim]{msg[0][:8]}:[/dim] {msg[1][:80]}")
+    for role, text in conversation:
+        console.print(f"  [dim]{role[:9]}:[/dim] {text[:80]}")
 
 
-def trigger_extraction(client, memory_id: str, session_id: str):
-    console.print(f"\n[bold]Triggering memory extraction job...[/bold]")
-    console.print("[dim]  This processes the session transcript and extracts memorable facts.[/dim]")
+def wait_for_extraction(client: MemoryClient, memory_id: str, timeout: int = 150):
+    """Long-term extraction runs asynchronously after events are stored.
 
-    response = client.create_memory_extraction_job(
-        memoryId=memory_id,
-        sessionId=session_id,
-    )
-    job_id = response["extractionJob"]["extractionJobId"]
-    console.print(f"  [green]✓ Job started:[/green] {job_id}")
-
+    There is no manual 'extraction job' to trigger — the semantic strategy
+    extracts facts in the background. Poll until records appear.
+    """
+    console.print(f"\n[bold]Waiting for long-term extraction...[/bold]")
+    console.print("[dim]  The semantic strategy extracts facts from the transcript in the background.[/dim]")
     start = time.time()
-    while time.time() - start < 120:
-        job = client.get_memory_extraction_job(
-            memoryId=memory_id,
-            extractionJobId=job_id,
-        )["extractionJob"]
-        status = job["status"]
-        console.print(f"  [dim]Status: {status}[/dim]", end="\r")
-        if status == "COMPLETED":
-            console.print(f"\n  [green]✓ Extraction complete![/green]")
-            return
-        if status == "FAILED":
-            console.print(f"\n  [red]Extraction failed[/red]")
-            return
-        time.sleep(5)
-    console.print("\n  [yellow]Extraction still running (taking longer than expected)[/yellow]")
+    while time.time() - start < timeout:
+        records = client.retrieve_memories(
+            memory_id=memory_id,
+            namespace=STRATEGY_NAMESPACE,
+            query="user preferences and project context",
+            actor_id=ACTOR_ID,
+            top_k=10,
+        )
+        if records:
+            console.print(f"  [green]✓ {len(records)} memory record(s) extracted[/green]")
+            return records
+        console.print(f"  [dim]Status: extracting... ({int(time.time()-start)}s)[/dim]", end="\r")
+        time.sleep(10)
+    console.print("\n  [yellow]No records yet — extraction can take a few minutes. Try recall again later.[/yellow]")
+    return []
 
 
-def list_memory_entries(client, memory_id: str):
-    console.print(f"\n[bold]Extracted memory entries:[/bold]")
+def _record_text(record: dict) -> str:
+    content = record.get("content", record)
+    if isinstance(content, dict):
+        return content.get("text", "") or str(content)
+    return str(content)
 
-    response = client.list_memory_entries(memoryId=memory_id)
-    entries = response.get("entries", [])
 
-    if not entries:
-        console.print("  [dim]No entries yet (extraction may still be processing)[/dim]")
+def display_memory_records(records: list):
+    console.print(f"\n[bold]Extracted memory records:[/bold]")
+    if not records:
+        console.print("  [dim]No records yet (extraction may still be processing)[/dim]")
         return
-
-    table = Table("Type", "Content", "Confidence", show_header=True, header_style="bold magenta")
-    for entry in entries[:10]:
-        content = entry.get("content", {}).get("text", "")[:80]
-        confidence = entry.get("confidence", 0)
-        entry_type = entry.get("type", "FACT")
-        table.add_row(entry_type, content, f"{confidence:.2f}")
-
+    table = Table("Content", "Score", show_header=True, header_style="bold magenta")
+    for r in records[:10]:
+        score = r.get("score", 0) or 0
+        table.add_row(_record_text(r)[:90], f"{score:.3f}")
     console.print(table)
 
 
-def demonstrate_recall(client, memory_id: str):
+def demonstrate_recall(client: MemoryClient, memory_id: str):
     console.print(f"\n[bold]Retrieving memory for a NEW session[/bold]")
     console.print("[dim]  Simulates: a user returns the next day and the agent remembers them.[/dim]")
 
-    new_session_id = f"new-session-{uuid.uuid4().hex[:8]}"
-
-    response = client.retrieve_memory(
-        memoryId=memory_id,
-        sessionId=new_session_id,
-        retrievalQuery={"text": "What do you know about this user?"},
+    recalled = client.retrieve_memories(
+        memory_id=memory_id,
+        namespace=STRATEGY_NAMESPACE,
+        query="What do you know about this user and their project?",
+        actor_id=ACTOR_ID,
+        top_k=3,
     )
-
-    recalled = response.get("retrievalResults", [])
     if recalled:
         console.print()
         for r in recalled[:3]:
-            text = r.get("content", {}).get("text", "")
-            score = r.get("score", 0)
+            score = r.get("score", 0) or 0
             console.print(Panel(
-                text,
-                title=f"[green]Recalled[/green] (confidence={score:.3f})",
+                _record_text(r),
+                title=f"[green]Recalled[/green] (score={score:.3f})",
                 border_style="green",
             ))
     else:
@@ -210,15 +206,15 @@ def main():
         border_style="blue",
     ))
 
-    memory_client = boto3.client("bedrock-agentcore", region_name=AWS_REGION)
+    memory_client = MemoryClient(region_name=AWS_REGION)
 
     memory_id = create_memory(memory_client)
     set_key(str(ENV_FILE), "AGENTCORE_MEMORY_ID", memory_id)
 
     session_id = f"workshop-session-{uuid.uuid4().hex[:8]}"
-    save_memory_to_session(memory_client, memory_id, session_id, SESSION_A_CONVERSATION)
-    trigger_extraction(memory_client, memory_id, session_id)
-    list_memory_entries(memory_client, memory_id)
+    save_conversation(memory_client, memory_id, session_id, SESSION_A_CONVERSATION)
+    records = wait_for_extraction(memory_client, memory_id)
+    display_memory_records(records)
     demonstrate_recall(memory_client, memory_id)
 
     console.print()
@@ -232,7 +228,7 @@ def main():
         "  2. Run extraction jobs nightly on completed sessions\n"
         "  3. Agent automatically enriches its context from recalled memories\n\n"
         "Next step:\n"
-        "  [bold]python 02_observability.py[/bold]",
+        "  [bold]uv run 02_observability.py[/bold]",
         title="Done",
         border_style="green",
     ))
